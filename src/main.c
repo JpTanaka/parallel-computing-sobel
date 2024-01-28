@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <sys/time.h>
-// #include <mpi.h>
+#include <mpi.h>
 
 #include "gif_lib.h"
 
@@ -848,6 +848,92 @@ apply_sobel_filter(animated_gif* image)
 
 }
 
+/* Creating MPI data structure to pixel and gif*/
+
+void create_pixel_mpi_type(MPI_Datatype* pixel_mpi_type) {
+    int block_lengths[3] = { 1, 1, 1 };
+    MPI_Datatype types[3] = { MPI_INT, MPI_INT, MPI_INT };
+    MPI_Aint offsets[3];
+    offsets[0] = offsetof(pixel, r);
+    offsets[1] = offsetof(pixel, g);
+    offsets[2] = offsetof(pixel, b);
+
+    MPI_Type_create_struct(3, block_lengths, offsets, types, pixel_mpi_type);
+    MPI_Type_commit(pixel_mpi_type);
+}
+
+void create_animated_gif_mpi_type(MPI_Datatype* animated_gif_mpi_type, MPI_Datatype pixel_mpi_type) {
+    int block_lengths[5] = { 1, 1, 1, 1, 1 };
+
+    MPI_Datatype types[5] = { MPI_INT, MPI_INT, MPI_INT, MPI_DOUBLE, MPI_DOUBLE };
+    MPI_Aint offsets[5];
+    offsets[0] = offsetof(animated_gif, n_images);
+    offsets[1] = offsetof(animated_gif, width);
+    offsets[2] = offsetof(animated_gif, height);
+    offsets[3] = offsetof(animated_gif, p);
+    offsets[4] = offsetof(animated_gif, g);
+
+    MPI_Type_create_struct(5, block_lengths, offsets, types, animated_gif_mpi_type);
+    MPI_Type_commit(animated_gif_mpi_type);
+}
+
+
+void serialize_one_image(animated_gif* image, int *serialized_image, int index){
+    // each serialized image will have
+    // n_images in position 0
+    // width in position 1
+    // height in position 2
+    // pixels in remaining positions
+    int width = image->width[index];
+    int height = image->height[index];
+    serialized_image = malloc(sizeof(int)*(3+width*height*3));
+    serialized_image[0] = image->n_images;
+    serialized_image[1] = width;
+    serialized_image[2] = height;
+    for(int j = 0; j < width*height*3; j+=3) {
+        serialized_image[j+3] = image->p[index][j/3].r;
+        serialized_image[j+4] = image->p[index][j/3].g;
+        serialized_image[j+5] = image->p[index][j/3].b;
+    }
+}
+
+/* Serialize the animated_gif* into an array of arrays,
+ each one representing an image */
+void serialize(animated_gif* image, int** serialized_images){
+    serialized_images = malloc(sizeof(int*)*n_images);
+    for(int i = 0; i < n_images; i++){
+        serialize_one_image(image, serialized_images[i], i);
+    }
+}
+// TODO
+void deserialize(int** serialized_images, animated_gif* image){
+    
+
+}
+
+
+/* DEBUG FUNCTIONS */
+void print_first_pixel(animated_gif* gif, int rank) {
+    if (gif == NULL) {
+        printf("Error: Null pointer to animated_gif structure.\n");
+        return;
+    }
+
+    for (int i = 0; i < gif->n_images; i++) {
+        int width = gif->width[i];
+        int height = gif->height[i];
+
+        if (width > 0 && height > 0) {
+            printf("antes do first pixel %d\n", rank);
+            pixel first_pixel = gif->p[i][0];  
+
+            printf("rank %d - Image %d - First Pixel (RGB): (%d, %d, %d)\n", rank, i + 1, first_pixel.r, first_pixel.g, first_pixel.b);
+        } else {
+            printf("Image %d - Invalid dimensions (width or height is <= 0).\n", i + 1);
+        }
+    }
+}
+
 /*
  * Main entry point
  */
@@ -856,15 +942,26 @@ main(int argc, char** argv)
 {
     char* input_filename;
     char* output_filename;
-    animated_gif* image;
+    animated_gif* image = NULL;
+    animated_gif* image_received;
+    animated_gif* remainder_images;
+    animated_gif* sent_images;
+
+    int num_images;
     struct timeval t1, t2;
     double duration;
+    int root_process = 0;
     int rank, size;
-    FILE *fptr;
+    FILE* fptr;
 
-    // MPI_Init(&argc, &argv)
-    // MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    // MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Datatype pixel_mpi_type;
+    MPI_Datatype animated_gif_mpi_type;
+
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    create_pixel_mpi_type(&pixel_mpi_type);
+    create_animated_gif_mpi_type(&animated_gif_mpi_type, pixel_mpi_type);
 
     /* Check command-line arguments */
     if (argc < 3) {
@@ -874,8 +971,7 @@ main(int argc, char** argv)
     input_filename = argv[1];
     output_filename = argv[2];
 
-
-    // if (rank == 0) {
+    if (rank == root_process) {
         /* IMPORT Timer start */
         gettimeofday(&t1, NULL);
         /* Load file and store the pixels in array */
@@ -889,21 +985,82 @@ main(int argc, char** argv)
 
         printf("GIF loaded from file %s with %d image(s) in %lf s\n",
             input_filename, image->n_images, duration);
-    // }
+        num_images = image->n_images;
+    }
+    MPI_Bcast(&num_images, 1, MPI_INT, root_process, MPI_COMM_WORLD);
 
-
-    /* FILTER Timer start */
     gettimeofday(&t1, NULL);
 
+    // To avoid unequal distribution, rank 0 will deal with the remainder+num_images/size images
+    // TODO: can we make it better?
+    int remainder = num_images % size;
+    int elements_per_process = num_images / size;
+    if (rank == root_process) {
+        sent_images = malloc(sizeof(animated_gif) * elements_per_process * size);
+        for (int i = 0; i < elements_per_process * size; i++) {
+            sent_images[i] = image[i];
+        }
+    }
+
+    // NOT WORKING, NEED TO SERIALIZE/DESERIALIZE THE ANIMATED_GIF
+    image_received= malloc(sizeof(animated_gif) * elements_per_process );
+    MPI_Scatter(
+        sent_images,
+        elements_per_process,
+        animated_gif_mpi_type,
+        image_received,
+        elements_per_process,
+        animated_gif_mpi_type,
+        root_process,
+        MPI_COMM_WORLD
+    );
+
+    if (rank == root_process && remainder != 0) {
+        remainder_images = image + elements_per_process * size;
+        remainder_images->n_images = remainder;
+        apply_gray_filter(remainder_images);
+        apply_blur_filter(remainder_images, 5, 20);
+        apply_sobel_filter(remainder_images);
+    }
+
+    /* FILTER Timer start */
+
     /* Convert the pixels into grayscale */
-    apply_gray_filter(image);
+    apply_gray_filter(image_received);
 
     /* Apply blur filter with convergence value */
-    apply_blur_filter(image, 5, 20);
+    apply_blur_filter(image_received, 5, 20);
 
     /* Apply sobel filter on pixels */
-    apply_sobel_filter(image);
+    apply_sobel_filter(image_received);
 
+    // NEED TO SERIALIZE/DESERIALIZE
+    animated_gif** recv;
+    recv = malloc(sizeof(animated_gif*)*size);
+    MPI_Gather(
+        image_received,
+        elements_per_process,
+        animated_gif_mpi_type,
+        recv,
+        elements_per_process,
+        animated_gif_mpi_type,
+        root_process,
+        MPI_COMM_WORLD
+    );
+    if (rank != root_process) {
+        MPI_Finalize();
+        return 0;
+    }
+    for(int i = 0; i < size; i++){
+        for(int j = 0; j < elements_per_process; j++) {
+            image[j + i*elements_per_process].p = recv[i][j].p;
+        }
+    }
+    if (remainder != 0) {
+        for (int i = size * elements_per_process; i < num_images; i++) {
+            image[i].p = remainder_images[i - size * elements_per_process].p;
+        }
+    }
     /* FILTER Timer stop */
     gettimeofday(&t2, NULL);
 
@@ -913,7 +1070,7 @@ main(int argc, char** argv)
 
     fptr = fopen("perf.log", "a");
     fprintf(fptr, "%d %d %f s\n", image->width[0], image->height[0], duration);
-    fclose(fptr);       
+    fclose(fptr);
 
     /* EXPORT Timer start */
     gettimeofday(&t1, NULL);
@@ -927,6 +1084,7 @@ main(int argc, char** argv)
     duration = (t2.tv_sec - t1.tv_sec) + ((t2.tv_usec - t1.tv_usec) / 1e6);
 
     printf("Export done in %lf s in file %s\n", duration, output_filename);
+    MPI_Finalize();
 
     return 0;
 }
