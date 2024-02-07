@@ -877,38 +877,102 @@ void create_animated_gif_mpi_type(MPI_Datatype* animated_gif_mpi_type, MPI_Datat
     MPI_Type_commit(animated_gif_mpi_type);
 }
 
-
-void serialize_one_image(animated_gif* image, int *serialized_image, int index){
-    // each serialized image will have
-    // n_images in position 0
-    // width in position 1
-    // height in position 2
-    // pixels in remaining positions
-    int width = image->width[index];
-    int height = image->height[index];
-    serialized_image = malloc(sizeof(int)*(3+width*height*3));
-    serialized_image[0] = image->n_images;
-    serialized_image[1] = width;
-    serialized_image[2] = height;
-    for(int j = 0; j < width*height*3; j+=3) {
-        serialized_image[j+3] = image->p[index][j/3].r;
-        serialized_image[j+4] = image->p[index][j/3].g;
-        serialized_image[j+5] = image->p[index][j/3].b;
+void serialize(animated_gif* image, int** serialized_images, int num_images){
+    int width = image->width[0];
+    int height = image->height[0];
+    *serialized_images = malloc(sizeof(int)*num_images*(3+3*width*height));
+    for(int i = 0; i < num_images; i++){
+        (*serialized_images)[i*width*height*3+0] = num_images;
+        (*serialized_images)[i*width*height*3+1] = width;
+        (*serialized_images)[i*width*height*3+2] = height;
+        for(int j = 0; j < width * height * 3; j += 3) {
+            (*serialized_images)[i*(width*height*3+3) + j + 3] = image->p[i][j / 3].r;
+            (*serialized_images)[i*(width*height*3+3) + j + 4] = image->p[i][j / 3].g;
+            (*serialized_images)[i*(width*height*3+3) + j + 5] = image->p[i][j / 3].b;
+        }
     }
 }
 
-/* Serialize the animated_gif* into an array of arrays,
- each one representing an image */
-void serialize(animated_gif* image, int** serialized_images){
-    serialized_images = malloc(sizeof(int*)*n_images);
-    for(int i = 0; i < n_images; i++){
-        serialize_one_image(image, serialized_images[i], i);
+void deserialize(int* serialized_images, animated_gif* image, int num_images) {
+    int width = serialized_images[1];
+    int height = serialized_images[2];
+    image->n_images = num_images;
+
+    image->width = malloc(sizeof(int) * num_images);
+    image->height = malloc(sizeof(int) * num_images);
+    image->p = malloc(sizeof(pixel*) * num_images);
+
+    for (int i = 0; i < num_images; i++) {
+        image->width[i] = serialized_images[i * (3 + 3 * width * height) + 1];
+        image->height[i] = serialized_images[i * (3 + 3 * width * height) + 2];
+
+        image->p[i] = malloc(sizeof(pixel) * image->width[i] * image->height[i]);
+
+        for (int j = 0; j < image->width[i] * image->height[i]; j++) {
+            image->p[i][j].r = serialized_images[i * (3 + 3 * width * height) + j * 3 + 3];
+            image->p[i][j].g = serialized_images[i * (3 + 3 * width * height) + j * 3 + 4];
+            image->p[i][j].b = serialized_images[i * (3 + 3 * width * height) + j * 3 + 5];
+        }
     }
 }
-// TODO
-void deserialize(int** serialized_images, animated_gif* image){
-    
+animated_gif create_dummy_image() {
+    animated_gif dummy;
 
+    // Set the number of images
+    dummy.n_images = 1;
+
+    // Allocate memory for width and height arrays
+    dummy.width = malloc(sizeof(int) * dummy.n_images);
+    dummy.height = malloc(sizeof(int) * dummy.n_images);
+
+    // Set the width and height for the first image
+    dummy.width[0] = 3;
+    dummy.height[0] = 3;
+
+    // Allocate memory for pixel array
+    dummy.p = malloc(sizeof(pixel*) * dummy.n_images);
+    dummy.p[0] = malloc(sizeof(pixel) * dummy.width[0] * dummy.height[0]);
+
+    // Set pixel values for the dummy image
+    int pixelValues[3][3][3] = {
+        {{255, 0, 0}, {0, 255, 0}, {0, 0, 255}},
+        {{255, 255, 0}, {255, 0, 255}, {0, 255, 255}},
+        {{128, 128, 128}, {0, 0, 0}, {255, 255, 255}}
+    };
+
+    for (int i = 0; i < dummy.width[0] * dummy.height[0]; i++) {
+        dummy.p[0][i].r = pixelValues[i / dummy.width[0]][i % dummy.width[0]][0];
+        dummy.p[0][i].g = pixelValues[i / dummy.width[0]][i % dummy.width[0]][1];
+        dummy.p[0][i].b = pixelValues[i / dummy.width[0]][i % dummy.width[0]][2];
+    }
+
+    return dummy;
+}
+
+bool is_dummy_image(const animated_gif* image) {
+    if (image->n_images != 1) {
+        return false;
+    }
+
+    if (image->width[0] != 3 || image->height[0] != 3) {
+        return false;
+    }
+
+    int expectedPixelValues[3][3][3] = {
+        {{255, 0, 0}, {0, 255, 0}, {0, 0, 255}},
+        {{255, 255, 0}, {255, 0, 255}, {0, 255, 255}},
+        {{128, 128, 128}, {0, 0, 0}, {255, 255, 255}}
+    };
+
+    for (int i = 0; i < 3 * 3; i++) {
+        if (image->p[0][i].r != expectedPixelValues[i / 3][i % 3][0] ||
+            image->p[0][i].g != expectedPixelValues[i / 3][i % 3][1] ||
+            image->p[0][i].b != expectedPixelValues[i / 3][i % 3][2]) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 
@@ -948,6 +1012,7 @@ main(int argc, char** argv)
     animated_gif* sent_images;
 
     int num_images;
+    int* image_information = malloc(sizeof(int)*3);
     struct timeval t1, t2;
     double duration;
     int root_process = 0;
@@ -985,35 +1050,65 @@ main(int argc, char** argv)
 
         printf("GIF loaded from file %s with %d image(s) in %lf s\n",
             input_filename, image->n_images, duration);
-        num_images = image->n_images;
+        image_information[0] = image->n_images;
+        image_information[1] = image->width[0];
+        image_information[2] = image->height[0];
     }
-    MPI_Bcast(&num_images, 1, MPI_INT, root_process, MPI_COMM_WORLD);
 
+    MPI_Bcast(image_information, 3, MPI_INT, root_process, MPI_COMM_WORLD);
+    num_images = image_information[0];
     gettimeofday(&t1, NULL);
 
     // To avoid unequal distribution, rank 0 will deal with the remainder+num_images/size images
     // TODO: can we make it better?
     int remainder = num_images % size;
     int elements_per_process = num_images / size;
-    if (rank == root_process) {
-        sent_images = malloc(sizeof(animated_gif) * elements_per_process * size);
-        for (int i = 0; i < elements_per_process * size; i++) {
-            sent_images[i] = image[i];
-        }
+    // if (rank == root_process) {
+    //     // We have to send only the first elements_per_process * size images
+    //     sent_images = malloc(sizeof(animated_gif) * elements_per_process * size);
+    //     for (int i = 0; i < elements_per_process * size; i++) {
+    //         sent_images[i] = image[i];
+    //     }
+    // }
+    int * serialized_image;
+    int num_serialized_images = num_images > elements_per_process*size ? elements_per_process*size : num_images;
+    // animated_gif* dummy = malloc(sizeof(animated_gif));
+    // *dummy = create_dummy_image();
+    // int *serialized_dummy;
+    // serialize(dummy, &serialized_dummy, 1);
+    // animated_gif* deserialized_dummy = malloc(sizeof(animated_gif));
+    // deserialize(serialized_dummy, deserialized_dummy, 1);
+    // printf("isDummy:%d \n", is_dummy_image(deserialized_dummy));
+    if(rank==root_process){
+        serialize(image, &serialized_image, num_serialized_images);
+        // printf("%d, %d\n", serialized_image[0], num_images);
+        // for(int i = 0; i < 20; i++) {
+            // printf("%d, %d\n", serialized_image[i], i);
+        // }
+
     }
+    int * received_serialized_image = malloc(sizeof(int)*elements_per_process*(3+3*image_information[1]*image_information[2]));
 
     // NOT WORKING, NEED TO SERIALIZE/DESERIALIZE THE ANIMATED_GIF
-    image_received= malloc(sizeof(animated_gif) * elements_per_process );
     MPI_Scatter(
-        sent_images,
-        elements_per_process,
-        animated_gif_mpi_type,
-        image_received,
-        elements_per_process,
-        animated_gif_mpi_type,
+        serialized_image,
+        elements_per_process*(3+3*image_information[1]*image_information[2]),
+        MPI_INT,
+        received_serialized_image,
+        elements_per_process*(3+3*image_information[1]*image_information[2]),
+        MPI_INT,
         root_process,
         MPI_COMM_WORLD
     );
+    printf("asdfasdf \n");
+
+    animated_gif* deserialized_image = malloc(sizeof(animated_gif));
+    printf("%d, rank %d, ---------------------AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA \n", received_serialized_image[0], rank);
+    for(int i = 0; i < 20; i++) {
+            printf("%d, %d\n", received_serialized_image[i], i);
+        }
+    deserialize(received_serialized_image, deserialized_image, elements_per_process);
+    // print_first_pixel(deserialized_image, 0);
 
     if (rank == root_process && remainder != 0) {
         remainder_images = image + elements_per_process * size;
@@ -1082,7 +1177,11 @@ main(int argc, char** argv)
     gettimeofday(&t2, NULL);
 
     duration = (t2.tv_sec - t1.tv_sec) + ((t2.tv_usec - t1.tv_usec) / 1e6);
-
+    free(image_information);
+    if (rank == root_process) {
+        free(serialized_image);
+    }
+    free(received_serialized_image);
     printf("Export done in %lf s in file %s\n", duration, output_filename);
     MPI_Finalize();
 
