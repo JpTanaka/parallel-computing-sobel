@@ -91,18 +91,6 @@ load_pixels(char* filename)
     {
         width[i] = g->SavedImages[i].ImageDesc.Width;
         height[i] = g->SavedImages[i].ImageDesc.Height;
-
-#if SOBELF_DEBUG
-        printf("Image %d: l:%d t:%d w:%d h:%d interlace:%d localCM:%p\n",
-            i,
-            g->SavedImages[i].ImageDesc.Left,
-            g->SavedImages[i].ImageDesc.Top,
-            g->SavedImages[i].ImageDesc.Width,
-            g->SavedImages[i].ImageDesc.Height,
-            g->SavedImages[i].ImageDesc.Interlace,
-            g->SavedImages[i].ImageDesc.ColorMap
-        );
-#endif
     }
 
 
@@ -113,14 +101,6 @@ load_pixels(char* filename)
         fprintf(stderr, "Error global colormap is NULL\n");
         return NULL;
     }
-
-#if SOBELF_DEBUG
-    printf("Global color map: count:%d bpp:%d sort:%d\n",
-        g->SColorMap->ColorCount,
-        g->SColorMap->BitsPerPixel,
-        g->SColorMap->SortFlag
-    );
-#endif
 
     /* Allocate the array of pixels to be returned */
     p = (pixel**)malloc(n_images * sizeof(pixel*));
@@ -365,10 +345,6 @@ store_pixels(char* filename, animated_gif* image)
                 }
                 else
                 {
-#if SOBELF_DEBUG
-                    printf("[DEBUG]\tFound existing color %d\n",
-                        found);
-#endif
                     image->g->ExtensionBlocks[j].Bytes[3] = found;
                 }
             }
@@ -403,15 +379,6 @@ store_pixels(char* filename, animated_gif* image)
                     if (moy < 0) moy = 0;
                     if (moy > 255) moy = 255;
 
-#if SOBELF_DEBUG
-                    printf("[DEBUG] Transparency color image %d (%d,%d,%d) -> (%d,%d,%d)\n",
-                        i,
-                        image->g->SColorMap->Colors[tr_color].Red,
-                        image->g->SColorMap->Colors[tr_color].Green,
-                        image->g->SColorMap->Colors[tr_color].Blue,
-                        moy, moy, moy);
-#endif
-
                     for (k = 0; k < n_colors; k++)
                     {
                         if (
@@ -435,11 +402,6 @@ store_pixels(char* filename, animated_gif* image)
                             return 0;
                         }
 
-#if SOBELF_DEBUG
-                        printf("[DEBUG]\tNew color %d\n",
-                            n_colors);
-#endif
-
                         colormap[n_colors].Red = moy;
                         colormap[n_colors].Green = moy;
                         colormap[n_colors].Blue = moy;
@@ -451,10 +413,6 @@ store_pixels(char* filename, animated_gif* image)
                     }
                     else
                     {
-#if SOBELF_DEBUG
-                        printf("[DEBUG]\tFound existing color %d\n",
-                            found);
-#endif
                         image->g->SavedImages[i].ExtensionBlocks[j].Bytes[3] = found;
                     }
                 }
@@ -462,21 +420,10 @@ store_pixels(char* filename, animated_gif* image)
         }
     }
 
-#if SOBELF_DEBUG
-    printf("[DEBUG] Number of colors after background and transparency: %d\n",
-        n_colors);
-#endif
-
     p = image->p;
-
     /* Find the number of colors inside the image */
     for (i = 0; i < image->n_images; i++)
     {
-
-#if SOBELF_DEBUG
-        printf("OUTPUT: Processing image %d (total of %d images) -> %d x %d\n",
-            i, image->n_images, image->width[i], image->height[i]);
-#endif
 
         for (j = 0; j < image->width[i] * image->height[i]; j++)
         {
@@ -501,11 +448,6 @@ store_pixels(char* filename, animated_gif* image)
                     return 0;
                 }
 
-#if SOBELF_DEBUG
-                printf("[DEBUG] Found new %d color (%d,%d,%d)\n",
-                    n_colors, p[i][j].r, p[i][j].g, p[i][j].b);
-#endif
-
                 colormap[n_colors].Red = p[i][j].r;
                 colormap[n_colors].Green = p[i][j].g;
                 colormap[n_colors].Blue = p[i][j].b;
@@ -514,20 +456,12 @@ store_pixels(char* filename, animated_gif* image)
         }
     }
 
-#if SOBELF_DEBUG
-    printf("OUTPUT: found %d color(s)\n", n_colors);
-#endif
-
 
     /* Round up to a power of 2 */
     if (n_colors != (1 << GifBitSize(n_colors)))
     {
         n_colors = (1 << GifBitSize(n_colors));
     }
-
-#if SOBELF_DEBUG
-    printf("OUTPUT: Rounding up to %d color(s)\n", n_colors);
-#endif
 
     /* Change the color map inside the animated gif */
     ColorMapObject* cmo;
@@ -568,8 +502,6 @@ store_pixels(char* filename, animated_gif* image)
             image->g->SavedImages[i].RasterBits[j] = found_index;
         }
     }
-
-
     /* Write the final image */
     if (!output_modified_read_gif(filename, image->g)) { return 0; }
 
@@ -603,28 +535,6 @@ apply_gray_filter(animated_gif* image)
 
 #define CONV(l,c,nb_c) \
     (l)*(nb_c)+(c)
-
-void apply_gray_line(animated_gif* image)
-{
-    int i, j, k;
-    pixel** p;
-
-    p = image->p;
-
-    for (i = 0; i < image->n_images; i++)
-    {
-        for (j = 0; j < 10; j++)
-        {
-            for (k = image->width[i] / 2; k < image->width[i]; k++)
-            {
-                p[i][CONV(j, k, image->width[i])].r = 0;
-                p[i][CONV(j, k, image->width[i])].g = 0;
-                p[i][CONV(j, k, image->width[i])].b = 0;
-            }
-        }
-    }
-}
-
 void
 apply_blur_filter(animated_gif* image, int size, int threshold)
 {
@@ -760,11 +670,6 @@ apply_blur_filter(animated_gif* image, int size, int threshold)
             }
 
         } while (threshold > 0 && !end);
-
-#if SOBELF_DEBUG
-        printf("BLUR: number of iterations for image %d\n", n_iter);
-#endif
-
         free(new);
     }
 
@@ -842,10 +747,59 @@ apply_sobel_filter(animated_gif* image)
                 p[i][CONV(j, k, width)].b = sobel[CONV(j, k, width)].b;
             }
         }
-
         free(sobel);
     }
+}
 
+void serialize(animated_gif* image, int** serialized_images, int num_images) {
+    int width = image->width[0];
+    int height = image->height[0];
+    *serialized_images = malloc(sizeof(int) * num_images * (3 + 3 * width * height));
+    for (int i = 0; i < num_images; i++) {
+        (*serialized_images)[i * width * height * 3 + 0] = num_images;
+        (*serialized_images)[i * width * height * 3 + 1] = width;
+        (*serialized_images)[i * width * height * 3 + 2] = height;
+        for (int j = 0; j < width * height * 3; j += 3) {
+            (*serialized_images)[i * (width * height * 3 + 3) + j + 3] = image->p[i][j / 3].r;
+            (*serialized_images)[i * (width * height * 3 + 3) + j + 4] = image->p[i][j / 3].g;
+            (*serialized_images)[i * (width * height * 3 + 3) + j + 5] = image->p[i][j / 3].b;
+        }
+    }
+}
+
+void deserialize(int* serialized_images, animated_gif* image, int num_images) {
+    int width = serialized_images[1];
+    int height = serialized_images[2];
+    image->n_images = num_images;
+
+    image->width = malloc(sizeof(int) * num_images);
+    image->height = malloc(sizeof(int) * num_images);
+    image->p = malloc(sizeof(pixel*) * num_images);
+
+    for (int i = 0; i < num_images; i++) {
+        image->width[i] = serialized_images[i * (3 + 3 * width * height) + 1];
+        image->height[i] = serialized_images[i * (3 + 3 * width * height) + 2];
+        image->p[i] = malloc(sizeof(pixel) * image->width[i] * image->height[i]);
+        for (int j = 0; j < image->width[i] * image->height[i]; j++) {
+            image->p[i][j].r = serialized_images[i * (3 + 3 * width * height) + j * 3 + 3];
+            image->p[i][j].g = serialized_images[i * (3 + 3 * width * height) + j * 3 + 4];
+            image->p[i][j].b = serialized_images[i * (3 + 3 * width * height) + j * 3 + 5];
+        }
+    }
+}
+
+int* get_image_from_serialized(int* serialized_images, int index) {
+    int width = serialized_images[1];
+    int height = serialized_images[2];
+    int initial_index = index * (width * height * 3 + 3);
+    int return_value[width * height * 3 + 3];
+    return_value[0] = serialized_images[initial_index];
+    return_value[1] = serialized_images[initial_index + 1];
+    return_value[2] = serialized_images[initial_index + 2];
+    for (int j = initial_index + 3; j < (index + 1) * (width * height * 3 + 3); j++) {
+        return_value[j - initial_index] = serialized_images[j];
+    }
+    return return_value;
 }
 
 /* Creating MPI data structure to pixel and gif*/
@@ -1025,8 +979,6 @@ main(int argc, char** argv)
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    create_pixel_mpi_type(&pixel_mpi_type);
-    create_animated_gif_mpi_type(&animated_gif_mpi_type, pixel_mpi_type);
 
     /* Check command-line arguments */
     if (argc < 3) {
@@ -1042,92 +994,48 @@ main(int argc, char** argv)
         /* Load file and store the pixels in array */
         image = load_pixels(input_filename);
         if (image == NULL) { return 1; }
-
         /* IMPORT Timer stop */
         gettimeofday(&t2, NULL);
-
         duration = (t2.tv_sec - t1.tv_sec) + ((t2.tv_usec - t1.tv_usec) / 1e6);
-
         printf("GIF loaded from file %s with %d image(s) in %lf s\n",
             input_filename, image->n_images, duration);
         image_information[0] = image->n_images;
         image_information[1] = image->width[0];
         image_information[2] = image->height[0];
     }
-
-    MPI_Bcast(image_information, 3, MPI_INT, root_process, MPI_COMM_WORLD);
-    num_images = image_information[0];
     gettimeofday(&t1, NULL);
-
-    // To avoid unequal distribution, rank 0 will deal with the remainder+num_images/size images
-    // TODO: can we make it better?
-    int remainder = num_images % size;
-    int elements_per_process = num_images / size;
+    int* serialized_image;
+    // int num_serialized_images = num_images > elements_per_process * size ? elements_per_process * size : num_images;
+    // int* received_serialized_image = malloc(sizeof(int) * elements_per_process * (3 + 3 * image_information[1] * image_information[2]));
     // if (rank == root_process) {
-    //     // We have to send only the first elements_per_process * size images
-    //     sent_images = malloc(sizeof(animated_gif) * elements_per_process * size);
-    //     for (int i = 0; i < elements_per_process * size; i++) {
-    //         sent_images[i] = image[i];
-    //     }
+    //     // serialize(image, &serialized_image, num_serialized_images);
+    //     int count = 0;
+        
     // }
-    int * serialized_image;
-    int num_serialized_images = num_images > elements_per_process*size ? elements_per_process*size : num_images;
-    // animated_gif* dummy = malloc(sizeof(animated_gif));
-    // *dummy = create_dummy_image();
-    // int *serialized_dummy;
-    // serialize(dummy, &serialized_dummy, 1);
-    // animated_gif* deserialized_dummy = malloc(sizeof(animated_gif));
-    // deserialize(serialized_dummy, deserialized_dummy, 1);
-    // printf("isDummy:%d \n", is_dummy_image(deserialized_dummy));
-    if(rank==root_process){
-        serialize(image, &serialized_image, num_serialized_images);
-        // printf("%d, %d\n", serialized_image[0], num_images);
-        // for(int i = 0; i < 20; i++) {
-            // printf("%d, %d\n", serialized_image[i], i);
-        // }
+    // else if(rank == 1) {
 
-    }
-    int * received_serialized_image = malloc(sizeof(int)*elements_per_process*(3+3*image_information[1]*image_information[2]));
+    // }
 
-    // NOT WORKING, NEED TO SERIALIZE/DESERIALIZE THE ANIMATED_GIF
-    MPI_Scatter(
-        serialized_image,
-        elements_per_process*(3+3*image_information[1]*image_information[2]),
-        MPI_INT,
-        received_serialized_image,
-        elements_per_process*(3+3*image_information[1]*image_information[2]),
-        MPI_INT,
-        root_process,
-        MPI_COMM_WORLD
-    );
-    printf("asdfasdf \n");
-
-    animated_gif* deserialized_image = malloc(sizeof(animated_gif));
-    printf("%d, rank %d, ---------------------AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA \n", received_serialized_image[0], rank);
-    for(int i = 0; i < 20; i++) {
-            printf("%d, %d\n", received_serialized_image[i], i);
-        }
-    deserialize(received_serialized_image, deserialized_image, elements_per_process);
-    // print_first_pixel(deserialized_image, 0);
-
-    if (rank == root_process && remainder != 0) {
-        remainder_images = image + elements_per_process * size;
-        remainder_images->n_images = remainder;
-        apply_gray_filter(remainder_images);
-        apply_blur_filter(remainder_images, 5, 20);
-        apply_sobel_filter(remainder_images);
-    }
-
+    // animated_gif* deserialized_image = malloc(sizeof(animated_gif));
+    // for (int i = 0; i < 20; i++) {
+    //     printf("%d, %d\n", received_serialized_image[i], i);
+    // }
+    // deserialize(received_serialized_image, deserialized_image, elements_per_process);
     /* FILTER Timer start */
 
     /* Convert the pixels into grayscale */
-    apply_gray_filter(image_received);
+    apply_gray_filter(image);
 
     /* Apply blur filter with convergence value */
-    apply_blur_filter(image_received, 5, 20);
+    apply_blur_filter(image, 5, 20);
 
     /* Apply sobel filter on pixels */
-    apply_sobel_filter(image_received);
+    apply_sobel_filter(image);
+
+    if (rank != root_process) {
+        MPI_Finalize();
+        return 0;
+    }
 
     // NEED TO SERIALIZE/DESERIALIZE
     animated_gif** recv;
@@ -1181,7 +1089,7 @@ main(int argc, char** argv)
     if (rank == root_process) {
         free(serialized_image);
     }
-    free(received_serialized_image);
+    // free(received_serialized_image);
     printf("Export done in %lf s in file %s\n", duration, output_filename);
     MPI_Finalize();
 
