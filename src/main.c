@@ -1005,23 +1005,6 @@ main(int argc, char** argv)
     }
     gettimeofday(&t1, NULL);
     int* serialized_image;
-    // int num_serialized_images = num_images > elements_per_process * size ? elements_per_process * size : num_images;
-    // int* received_serialized_image = malloc(sizeof(int) * elements_per_process * (3 + 3 * image_information[1] * image_information[2]));
-    // if (rank == root_process) {
-    //     // serialize(image, &serialized_image, num_serialized_images);
-    //     int count = 0;
-        
-    // }
-    // else if(rank == 1) {
-
-    // }
-
-    // animated_gif* deserialized_image = malloc(sizeof(animated_gif));
-    // for (int i = 0; i < 20; i++) {
-    //     printf("%d, %d\n", received_serialized_image[i], i);
-    // }
-    // deserialize(received_serialized_image, deserialized_image, elements_per_process);
-    /* FILTER Timer start */
 
     /* Convert the pixels into grayscale */
     apply_gray_filter(image);
@@ -1038,31 +1021,9 @@ main(int argc, char** argv)
     }
 
     // NEED TO SERIALIZE/DESERIALIZE
-    animated_gif** recv;
-    recv = malloc(sizeof(animated_gif*)*size);
-    MPI_Gather(
-        image_received,
-        elements_per_process,
-        animated_gif_mpi_type,
-        recv,
-        elements_per_process,
-        animated_gif_mpi_type,
-        root_process,
-        MPI_COMM_WORLD
-    );
     if (rank != root_process) {
         MPI_Finalize();
         return 0;
-    }
-    for(int i = 0; i < size; i++){
-        for(int j = 0; j < elements_per_process; j++) {
-            image[j + i*elements_per_process].p = recv[i][j].p;
-        }
-    }
-    if (remainder != 0) {
-        for (int i = size * elements_per_process; i < num_images; i++) {
-            image[i].p = remainder_images[i - size * elements_per_process].p;
-        }
     }
     /* FILTER Timer stop */
     gettimeofday(&t2, NULL);
