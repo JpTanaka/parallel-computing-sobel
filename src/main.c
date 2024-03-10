@@ -751,21 +751,6 @@ apply_sobel_filter(animated_gif* image)
     }
 }
 
-void serialize(animated_gif* image, int** serialized_images, int num_images) {
-    int width = image->width[0];
-    int height = image->height[0];
-    *serialized_images = malloc(sizeof(int) * num_images * (3 + 3 * width * height));
-    for (int i = 0; i < num_images; i++) {
-        (*serialized_images)[i * width * height * 3 + 0] = num_images;
-        (*serialized_images)[i * width * height * 3 + 1] = width;
-        (*serialized_images)[i * width * height * 3 + 2] = height;
-        for (int j = 0; j < width * height * 3; j += 3) {
-            (*serialized_images)[i * (width * height * 3 + 3) + j + 3] = image->p[i][j / 3].r;
-            (*serialized_images)[i * (width * height * 3 + 3) + j + 4] = image->p[i][j / 3].g;
-            (*serialized_images)[i * (width * height * 3 + 3) + j + 5] = image->p[i][j / 3].b;
-        }
-    }
-}
 
 void deserialize(int* serialized_images, animated_gif* image, int num_images) {
     int width = serialized_images[1];
@@ -802,35 +787,6 @@ int* get_image_from_serialized(int* serialized_images, int index) {
     return return_value;
 }
 
-/* Creating MPI data structure to pixel and gif*/
-
-void create_pixel_mpi_type(MPI_Datatype* pixel_mpi_type) {
-    int block_lengths[3] = { 1, 1, 1 };
-    MPI_Datatype types[3] = { MPI_INT, MPI_INT, MPI_INT };
-    MPI_Aint offsets[3];
-    offsets[0] = offsetof(pixel, r);
-    offsets[1] = offsetof(pixel, g);
-    offsets[2] = offsetof(pixel, b);
-
-    MPI_Type_create_struct(3, block_lengths, offsets, types, pixel_mpi_type);
-    MPI_Type_commit(pixel_mpi_type);
-}
-
-void create_animated_gif_mpi_type(MPI_Datatype* animated_gif_mpi_type, MPI_Datatype pixel_mpi_type) {
-    int block_lengths[5] = { 1, 1, 1, 1, 1 };
-
-    MPI_Datatype types[5] = { MPI_INT, MPI_INT, MPI_INT, MPI_DOUBLE, MPI_DOUBLE };
-    MPI_Aint offsets[5];
-    offsets[0] = offsetof(animated_gif, n_images);
-    offsets[1] = offsetof(animated_gif, width);
-    offsets[2] = offsetof(animated_gif, height);
-    offsets[3] = offsetof(animated_gif, p);
-    offsets[4] = offsetof(animated_gif, g);
-
-    MPI_Type_create_struct(5, block_lengths, offsets, types, animated_gif_mpi_type);
-    MPI_Type_commit(animated_gif_mpi_type);
-}
-
 void serialize(animated_gif* image, int** serialized_images, int num_images){
     int width = image->width[0];
     int height = image->height[0];
@@ -847,28 +803,7 @@ void serialize(animated_gif* image, int** serialized_images, int num_images){
     }
 }
 
-void deserialize(int* serialized_images, animated_gif* image, int num_images) {
-    int width = serialized_images[1];
-    int height = serialized_images[2];
-    image->n_images = num_images;
 
-    image->width = malloc(sizeof(int) * num_images);
-    image->height = malloc(sizeof(int) * num_images);
-    image->p = malloc(sizeof(pixel*) * num_images);
-
-    for (int i = 0; i < num_images; i++) {
-        image->width[i] = serialized_images[i * (3 + 3 * width * height) + 1];
-        image->height[i] = serialized_images[i * (3 + 3 * width * height) + 2];
-
-        image->p[i] = malloc(sizeof(pixel) * image->width[i] * image->height[i]);
-
-        for (int j = 0; j < image->width[i] * image->height[i]; j++) {
-            image->p[i][j].r = serialized_images[i * (3 + 3 * width * height) + j * 3 + 3];
-            image->p[i][j].g = serialized_images[i * (3 + 3 * width * height) + j * 3 + 4];
-            image->p[i][j].b = serialized_images[i * (3 + 3 * width * height) + j * 3 + 5];
-        }
-    }
-}
 animated_gif create_dummy_image() {
     animated_gif dummy;
 
@@ -930,28 +865,6 @@ bool is_dummy_image(const animated_gif* image) {
 }
 
 
-/* DEBUG FUNCTIONS */
-void print_first_pixel(animated_gif* gif, int rank) {
-    if (gif == NULL) {
-        printf("Error: Null pointer to animated_gif structure.\n");
-        return;
-    }
-
-    for (int i = 0; i < gif->n_images; i++) {
-        int width = gif->width[i];
-        int height = gif->height[i];
-
-        if (width > 0 && height > 0) {
-            printf("antes do first pixel %d\n", rank);
-            pixel first_pixel = gif->p[i][0];  
-
-            printf("rank %d - Image %d - First Pixel (RGB): (%d, %d, %d)\n", rank, i + 1, first_pixel.r, first_pixel.g, first_pixel.b);
-        } else {
-            printf("Image %d - Invalid dimensions (width or height is <= 0).\n", i + 1);
-        }
-    }
-}
-
 /*
  * Main entry point
  */
@@ -961,9 +874,6 @@ main(int argc, char** argv)
     char* input_filename;
     char* output_filename;
     animated_gif* image = NULL;
-    animated_gif* image_received;
-    animated_gif* remainder_images;
-    animated_gif* sent_images;
 
     int num_images;
     int* image_information = malloc(sizeof(int)*3);
@@ -973,8 +883,6 @@ main(int argc, char** argv)
     int rank, size;
     FILE* fptr;
 
-    MPI_Datatype pixel_mpi_type;
-    MPI_Datatype animated_gif_mpi_type;
 
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
