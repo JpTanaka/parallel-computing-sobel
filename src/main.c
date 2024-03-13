@@ -11,7 +11,7 @@
 
 #include "gif_lib.h"
 
-/* Represent one pixel from the image */
+ /* Represent one pixel from the image */
 typedef struct pixel {
     int r; /* Red */
     int g; /* Green */
@@ -210,8 +210,8 @@ int store_pixels(char* filename, animated_gif* image)
     /* Change the background color and store it */
     int moy;
     moy = (image->g->SColorMap->Colors[image->g->SBackGroundColor].Red
-              + image->g->SColorMap->Colors[image->g->SBackGroundColor].Green
-              + image->g->SColorMap->Colors[image->g->SBackGroundColor].Blue)
+        + image->g->SColorMap->Colors[image->g->SBackGroundColor].Green
+        + image->g->SColorMap->Colors[image->g->SBackGroundColor].Blue)
         / 3;
     if (moy < 0)
         moy = 0;
@@ -239,8 +239,8 @@ int store_pixels(char* filename, animated_gif* image)
                 int found = -1;
 
                 moy = (image->g->SColorMap->Colors[tr_color].Red
-                          + image->g->SColorMap->Colors[tr_color].Green
-                          + image->g->SColorMap->Colors[tr_color].Blue)
+                    + image->g->SColorMap->Colors[tr_color].Green
+                    + image->g->SColorMap->Colors[tr_color].Blue)
                     / 3;
                 if (moy < 0)
                     moy = 0;
@@ -269,7 +269,8 @@ int store_pixels(char* filename, animated_gif* image)
                     image->g->ExtensionBlocks[j].Bytes[3] = n_colors;
 
                     n_colors++;
-                } else {
+                }
+                else {
                     image->g->ExtensionBlocks[j].Bytes[3] = found;
                 }
             }
@@ -289,8 +290,8 @@ int store_pixels(char* filename, animated_gif* image)
                     int found = -1;
 
                     moy = (image->g->SColorMap->Colors[tr_color].Red
-                              + image->g->SColorMap->Colors[tr_color].Green
-                              + image->g->SColorMap->Colors[tr_color].Blue)
+                        + image->g->SColorMap->Colors[tr_color].Green
+                        + image->g->SColorMap->Colors[tr_color].Blue)
                         / 3;
                     if (moy < 0)
                         moy = 0;
@@ -319,7 +320,8 @@ int store_pixels(char* filename, animated_gif* image)
                         image->g->SavedImages[i].ExtensionBlocks[j].Bytes[3] = n_colors;
 
                         n_colors++;
-                    } else {
+                    }
+                    else {
                         image->g->SavedImages[i].ExtensionBlocks[j].Bytes[3] = found;
                     }
                 }
@@ -424,35 +426,29 @@ void apply_gray_filter(animated_gif* image)
 
 #define CONV(l, c, nb_c) \
     (l) * (nb_c) + (c)
-void apply_blur_filter_matrix(int*** image, int size, int threshold, int n_images, int width, int height)
+void apply_blur_filter_flattened_array(int* image, int size, int threshold, int n_images, int width, int height)
 {
     int i, j, k;
-    int n_iter = 0;
-    int* new_image;
+    int end;
 
     for (i = 0; i < n_images; i++) {
-        n_iter = 0;
-        new_image = (int*)malloc(width * height * sizeof(int));
-
+        int* new_image = (int*)malloc(width * height * sizeof(int));
         do {
-            int end = 1;
-            n_iter++;
-
-            for (j = 0; j < height; j++) {
-                for (k = 0; k < size; k++) {
-                    new_image[CONV(j, k, width)] = image[i][k][j];
-                    new_image[CONV(j, width - 1 - k, width)] = image[i][width - 1 - k][j];
+            end = 1;
+            for (j = 0; j < height - 1; j++) {
+                for (k = 0; k < width - 1; k++) {
+                    new_image[CONV(j, k, width)] = image[i*width*height+CONV(j, k, width)];
                 }
             }
-
-            for (j = size; j < height - size; j++) {
+            /* Apply blur on top part of image (10%) */
+            for (j = size; j < height / 10 - size; j++) {
                 for (k = size; k < width - size; k++) {
                     int stencil_j, stencil_k;
                     int t = 0;
 
                     for (stencil_j = -size; stencil_j <= size; stencil_j++) {
                         for (stencil_k = -size; stencil_k <= size; stencil_k++) {
-                            t += image[i][k + stencil_k][j + stencil_j];
+                            t += image[i*width*height+CONV(j+stencil_j, k+stencil_k, width)];
                         }
                     }
 
@@ -460,36 +456,56 @@ void apply_blur_filter_matrix(int*** image, int size, int threshold, int n_image
                 }
             }
 
-            for (j = 0; j < size; j++) {
-                for (k = 0; k < width; k++) {
-                    new_image[CONV(j, k, width)] = image[i][k][j];
-                    new_image[CONV(height - 1 - j, k, width)] = image[i][k][height - 1 - j];
+            /* Copy the middle part of the image */
+            for (j = height / 10 - size; j < height * 0.9 + size; j++) {
+                for (k = size; k < width - size; k++) {
+                    new_image[CONV(j, k, width)] = image[i*width*height+CONV(j, k, width)];
                 }
             }
 
+            /* Apply blur on the bottom part of the image (10%) */
+            for (j = height * 0.9 + size; j < height - size; j++) {
+                for (k = size; k < width - size; k++) {
+                    int stencil_j, stencil_k;
+                    int t = 0;
+
+                    for (stencil_j = -size; stencil_j <= size; stencil_j++) {
+                        for (stencil_k = -size; stencil_k <= size; stencil_k++) {
+                            t += image[i*width*height+CONV(j+stencil_j, k+stencil_k, width)];
+                        }
+                    }
+
+                    new_image[CONV(j, k, width)] = t / ((2 * size + 1) * (2 * size + 1));
+                }
+            }
+
+            float max_diff = 0;
             for (j = 1; j < height - 1; j++) {
                 for (k = 1; k < width - 1; k++) {
-                    float diff = new_image[CONV(j, k, width)] - image[i][k][j];
+                    float diff = new_image[CONV(j, k, width)] - image[i*width*height+CONV(j, k, width)];
+                    if (diff > max_diff) {
+                        max_diff = diff;
+                    }
                     if (diff > threshold || -diff > threshold) {
                         end = 0;
                     }
-                    image[i][k][j] = new_image[CONV(j, k, width)];
+                    image[i*width*height+CONV(j, k, width)] = new_image[CONV(j, k, width)];
                 }
             }
-
         } while (threshold > 0 && !end);
 
         free(new_image);
     }
 }
 
+#define CONV(l, c, nb_c) \
+    (l) * (nb_c) + (c)
 
 void apply_blur_filter(animated_gif* image, int size, int threshold)
 {
     int i, j, k;
     int width, height;
     int end = 0;
-    int n_iter = 0;
 
     pixel** p;
     pixel* new;
@@ -499,7 +515,6 @@ void apply_blur_filter(animated_gif* image, int size, int threshold)
 
     /* Process all images */
     for (i = 0; i < image->n_images; i++) {
-        n_iter = 0;
         width = image->width[i];
         height = image->height[i];
 
@@ -509,7 +524,6 @@ void apply_blur_filter(animated_gif* image, int size, int threshold)
         /* Perform at least one blur iteration */
         do {
             end = 1;
-            n_iter++;
 
             for (j = 0; j < height - 1; j++) {
                 for (k = 0; k < width - 1; k++) {
@@ -600,34 +614,30 @@ void apply_blur_filter(animated_gif* image, int size, int threshold)
     }
 }
 
-
-void apply_sobel_filter_matrix(int*** image, int width, int height, int n_images)
+void apply_sobel_filter_flattened_array(int* image, int width, int height, int n_images)
 {
     int i, j, k;
 
     for (i = 0; i < n_images; i++) {
-
         int* sobel = (int*)malloc(width * height * sizeof(int));
-
         for (j = 1; j < height - 1; j++) {
             for (k = 1; k < width - 1; k++) {
                 int pixel_no, pixel_n, pixel_ne;
                 int pixel_so, pixel_s, pixel_se;
-                int pixel_o, pixel, pixel_e;
+                int pixel_o, pixel_e;
 
                 float deltaX;
                 float deltaY;
                 float val;
 
-                pixel_no = image[i][j - 1][k - 1];
-                pixel_n = image[i][j - 1][k];
-                pixel_ne = image[i][j - 1][k + 1];
-                pixel_so = image[i][j + 1][k - 1];
-                pixel_s = image[i][j + 1][k];
-                pixel_se = image[i][j + 1][k + 1];
-                pixel_o = image[i][j][k - 1];
-                pixel = image[i][j][k];
-                pixel_e = image[i][j][k + 1];
+                pixel_no = image[i*width*height + CONV(j - 1, k - 1, width)];
+                pixel_n = image[i*width*height + CONV(j - 1, k, width)];
+                pixel_ne = image[i*width*height + CONV(j - 1, k + 1, width)];
+                pixel_so = image[i*width*height + CONV(j + 1, k - 1, width)];
+                pixel_s = image[i*width*height + CONV(j + 1, k, width)];
+                pixel_se = image[i*width*height + CONV(j + 1, k + 1, width)];
+                pixel_o = image[i*width*height + CONV(j, k - 1, width)];
+                pixel_e = image[i*width*height + CONV(j, k + 1, width)];
 
                 deltaX = -pixel_no + pixel_ne - 2 * pixel_o + 2 * pixel_e - pixel_so + pixel_se;
                 deltaY = pixel_se + 2 * pixel_s + pixel_so - pixel_ne - 2 * pixel_n - pixel_no;
@@ -636,7 +646,8 @@ void apply_sobel_filter_matrix(int*** image, int width, int height, int n_images
 
                 if (val > 50) {
                     sobel[CONV(j, k, width)] = 255;
-                } else {
+                }
+                else {
                     sobel[CONV(j, k, width)] = 0;
                 }
             }
@@ -644,7 +655,7 @@ void apply_sobel_filter_matrix(int*** image, int width, int height, int n_images
 
         for (j = 1; j < height - 1; j++) {
             for (k = 1; k < width - 1; k++) {
-                image[i][k][j] = sobel[CONV(j, k, width)];
+                image[i*width*height+CONV(j, k, width)] = sobel[CONV(j, k, width)];
             }
         }
         free(sobel);
@@ -700,7 +711,8 @@ void apply_sobel_filter(animated_gif* image)
                     sobel[CONV(j, k, width)].r = 255;
                     sobel[CONV(j, k, width)].g = 255;
                     sobel[CONV(j, k, width)].b = 255;
-                } else {
+                }
+                else {
                     sobel[CONV(j, k, width)].r = 0;
                     sobel[CONV(j, k, width)].g = 0;
                     sobel[CONV(j, k, width)].b = 0;
@@ -719,160 +731,46 @@ void apply_sobel_filter(animated_gif* image)
     }
 }
 
-void deserialize(int* serialized_images, animated_gif* image, int num_images)
+int* gif_to_flatten_array(const animated_gif* image, int num_images)
 {
-    int width = serialized_images[1];
-    int height = serialized_images[2];
-    image->n_images = num_images;
 
-    image->width = malloc(sizeof(int) * num_images);
-    image->height = malloc(sizeof(int) * num_images);
-    image->p = malloc(sizeof(pixel*) * num_images);
-
+    int height = image->height[0];
+    int width = image->width[0];
+    int* array = malloc(num_images*width*height*sizeof(int));
     for (int i = 0; i < num_images; i++) {
-        image->width[i] = serialized_images[i * (3 + 3 * width * height) + 1];
-        image->height[i] = serialized_images[i * (3 + 3 * width * height) + 2];
-        image->p[i] = malloc(sizeof(pixel) * image->width[i] * image->height[i]);
-        for (int j = 0; j < image->width[i] * image->height[i]; j++) {
-            image->p[i][j].r = serialized_images[i * (3 + 3 * width * height) + j * 3 + 3];
-            image->p[i][j].g = serialized_images[i * (3 + 3 * width * height) + j * 3 + 4];
-            image->p[i][j].b = serialized_images[i * (3 + 3 * width * height) + j * 3 + 5];
+        int offset = width-image->width[i];
+        for (int j = 0; j < image->height[i]; j++) {
+            for (int k = 0; k < image->width[i]; k++) {
+                int moy;
+                pixel** p = image->p;
+                moy = (p[i][CONV(j, k, image->width[i])].r + p[i][CONV(j, k, image->width[i])].g + p[i][CONV(j, k, image->width[i])].b) / 3;
+                if (moy < 0)
+                    moy = 0;
+                if (moy > 255)
+                    moy = 255;
+                array[i*width*height+CONV(j, k+offset, width)] = moy;
+            }
+            for (int k = 0; k < offset; k++) {
+                array[i*width*height+CONV(j, k, width)] = 0;
+            }
         }
     }
+
+    return array;
 }
 
-int* get_image_from_serialized(int* serialized_images, int index)
-{
-    int width = serialized_images[1];
-    int height = serialized_images[2];
-    int initial_index = index * (width * height * 3 + 3);
-    int return_value[width * height * 3 + 3];
-    return_value[0] = serialized_images[initial_index];
-    return_value[1] = serialized_images[initial_index + 1];
-    return_value[2] = serialized_images[initial_index + 2];
-    for (int j = initial_index + 3; j < (index + 1) * (width * height * 3 + 3); j++) {
-        return_value[j - initial_index] = serialized_images[j];
-    }
-    return return_value;
-}
-
-void serialize(animated_gif* image, int** serialized_images, int num_images)
-{
+void flattened_matrix_to_gif(animated_gif* image, int* flattened_matrix) {
     int width = image->width[0];
     int height = image->height[0];
-    *serialized_images = malloc(sizeof(int) * num_images * (3 + 3 * width * height));
-    for (int i = 0; i < num_images; i++) {
-        (*serialized_images)[i * width * height * 3 + 0] = num_images;
-        (*serialized_images)[i * width * height * 3 + 1] = width;
-        (*serialized_images)[i * width * height * 3 + 2] = height;
-        for (int j = 0; j < width * height * 3; j += 3) {
-            (*serialized_images)[i * (width * height * 3 + 3) + j + 3] = image->p[i][j / 3].r;
-            (*serialized_images)[i * (width * height * 3 + 3) + j + 4] = image->p[i][j / 3].g;
-            (*serialized_images)[i * (width * height * 3 + 3) + j + 5] = image->p[i][j / 3].b;
-        }
-    }
-}
-
-animated_gif create_dummy_image()
-{
-    animated_gif dummy;
-
-    // Set the number of images
-    dummy.n_images = 1;
-
-    // Allocate memory for width and height arrays
-    dummy.width = malloc(sizeof(int) * dummy.n_images);
-    dummy.height = malloc(sizeof(int) * dummy.n_images);
-
-    // Set the width and height for the first image
-    dummy.width[0] = 3;
-    dummy.height[0] = 3;
-
-    // Allocate memory for pixel array
-    dummy.p = malloc(sizeof(pixel*) * dummy.n_images);
-    dummy.p[0] = malloc(sizeof(pixel) * dummy.width[0] * dummy.height[0]);
-
-    // Set pixel values for the dummy image
-    int pixelValues[3][3][3] = {
-        { { 255, 0, 0 }, { 0, 255, 0 }, { 0, 0, 255 } },
-        { { 255, 255, 0 }, { 255, 0, 255 }, { 0, 255, 255 } },
-        { { 128, 128, 128 }, { 0, 0, 0 }, { 255, 255, 255 } }
-    };
-
-    for (int i = 0; i < dummy.width[0] * dummy.height[0]; i++) {
-        dummy.p[0][i].r = pixelValues[i / dummy.width[0]][i % dummy.width[0]][0];
-        dummy.p[0][i].g = pixelValues[i / dummy.width[0]][i % dummy.width[0]][1];
-        dummy.p[0][i].b = pixelValues[i / dummy.width[0]][i % dummy.width[0]][2];
-    }
-
-    return dummy;
-}
-
-bool is_dummy_image(const animated_gif* image)
-{
-    if (image->n_images != 1) {
-        return false;
-    }
-
-    if (image->width[0] != 3 || image->height[0] != 3) {
-        return false;
-    }
-
-    int expectedPixelValues[3][3][3] = {
-        { { 255, 0, 0 }, { 0, 255, 0 }, { 0, 0, 255 } },
-        { { 255, 255, 0 }, { 255, 0, 255 }, { 0, 255, 255 } },
-        { { 128, 128, 128 }, { 0, 0, 0 }, { 255, 255, 255 } }
-    };
-
-    for (int i = 0; i < 3 * 3; i++) {
-        if (image->p[0][i].r != expectedPixelValues[i / 3][i % 3][0] || image->p[0][i].g != expectedPixelValues[i / 3][i % 3][1] || image->p[0][i].b != expectedPixelValues[i / 3][i % 3][2]) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-int*** gif_to_matrix(const animated_gif* image, int num_images)
-{
-    // create a 3D matrix [num_images, width, height] representing the gif
-    int width = image->width[0];
-    int height = image->height[0];
-
-    int*** serialized_images = (int***)malloc(num_images * sizeof(int**));
-    for (int i = 0; i < num_images; i++) {
-        serialized_images[i] = (int**)malloc(width * sizeof(int*));
-        for (int j = 0; j < width; j++) {
-            serialized_images[i][j] = (int*)malloc(height * sizeof(int));
-        }
-    }
-
-    for (int i = 0; i < num_images; i++) {
-        for (int j = 0; j < width * height; j++) {
-            int moy;
-            pixel** p = image->p;
-            moy = (p[i][j].r + p[i][j].g + p[i][j].b) / 3;
-            if (moy < 0)
-                moy = 0;
-            if (moy > 255)
-                moy = 255;
-            serialized_images[i][j % width][j / width] = moy;
-        }
-    }
-
-    return serialized_images;
-}
-
-void matrix_to_gif(animated_gif* image, int*** gif_matrix) {
-    int width = image->width[0];
-    int height = image->height[0];
-
+    int idx = 0;
     for (int i = 0; i < image->n_images; i++) {
-        for (int j = 0; j < width; j++) {
-            for(int k = 0; k < height; k++) {
-                image->p[i][CONV(j, k, width)].r = gif_matrix[i][j][k];
-                image->p[i][CONV(j, k, width)].g = gif_matrix[i][j][k];
-                image->p[i][CONV(j, k, width)].b = gif_matrix[i][j][k];
+        image->p[i] = malloc(width*height*sizeof(pixel));
+        for (int j = 0; j < height; j++) {
+            for (int k = 0; k < width; k++) {
+                image->p[i][CONV(j, k, width)].r = flattened_matrix[idx];
+                image->p[i][CONV(j, k, width)].g = flattened_matrix[idx];
+                image->p[i][CONV(j, k, width)].b = flattened_matrix[idx];
+                idx++;
             }
         }
     }
@@ -887,14 +785,13 @@ int main(int argc, char** argv)
     char* output_filename;
     animated_gif* image = NULL;
 
-    int num_images;
     int* image_information = malloc(sizeof(int) * 3);
     struct timeval t1, t2;
     double duration;
     int root_process = 0;
     int rank, size;
     FILE* fptr;
-
+    int*** gif_matrix;
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -907,6 +804,7 @@ int main(int argc, char** argv)
     input_filename = argv[1];
     output_filename = argv[2];
 
+    int* flattened_gif_matrix;
     if (rank == root_process) {
         /* IMPORT Timer start */
         gettimeofday(&t1, NULL);
@@ -923,9 +821,9 @@ int main(int argc, char** argv)
         image_information[0] = image->n_images;
         image_information[1] = image->width[0];
         image_information[2] = image->height[0];
-        int*** gif_matrix = gif_to_matrix(image, image->n_images);
+
+        flattened_gif_matrix = gif_to_flatten_array(image, image->n_images);
     }
-    int*** current_gif;
     MPI_Bcast(image_information, 3, MPI_INT, root_process, MPI_COMM_WORLD);
     int width = image_information[1];
     int height = image_information[2];
@@ -935,60 +833,40 @@ int main(int argc, char** argv)
     int nb_pixels = width * height;
     if (rank == root_process) {
         int count = 0;
-        int received_rank;
         for (int i = 1; i < size; i++) {
-            int nb_images = images_per_rank + (remainder_images <= i ? 1 : 0);
-            MPI_SendRecv(gif_matrix + count * nb_pixels, nb_images * nb_pixels, MPI_INT, i, 0, gif_matrix + count * nb_pixels, count * nb_images, MPI_INT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            int nb_images = images_per_rank + (remainder_images >= i ? 1 : 0);
+            if (nb_images == 0) {
+                break;
+            }
+            MPI_Sendrecv(flattened_gif_matrix + count * nb_pixels, nb_images * nb_pixels, MPI_INT, i, 0,
+                flattened_gif_matrix + count * nb_pixels, nb_pixels * nb_images, MPI_INT, i, 0,
+                MPI_COMM_WORLD, NULL);
             count += nb_images;
         }
-    } else {
-        int nb_images_local = images_per_rank + (remainder_images <= rank ? 1 : 0);
-        int*** buffer = (int***)malloc(nb_images_local * sizeof(int**));
-        for (int i = 0; i < num_images; i++) {
-            buffer[i] = (int**)malloc(width * sizeof(int*));
-            for (int j = 0; j < width; j++) {
-                buffer[i][j] = (int*)malloc(height * sizeof(int));
-            }
+    }
+    else {
+        int nb_images_local = images_per_rank + (remainder_images >= rank ? 1 : 0);
+        if (nb_images_local == 0) {
+            free(image_information);
+            MPI_Finalize();
+            return 0;
         }
-        MPI_Recv(&(buffer[0][0][0]), nb_images_local * nb_pixels, MPI_INT, root_process, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        apply_blur_filter_matrix(buffer, 5, 20, nb_images_local, width, height);
-        apply_sobel_filter_matrix(buffer, width, height, nb_images_local);
-        MPI_Send(&(buffer[0][0][0]), nb_images_local * nb_pixels, MPI_INT, root_process, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-
-        for (int i = 0; i < nb_images_local; i++) {
-            for (int j = 0; j < width; j++) {
-                free(buffer[i][j]);
-            }
-            free(buffer[i]);
-        }
+        int* buffer = (int*)malloc(nb_images_local * nb_pixels * sizeof(int));
+        MPI_Recv(buffer, nb_images_local * nb_pixels, MPI_INT, root_process, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        apply_blur_filter_flattened_array(buffer, 5, 20, nb_images_local, width, height);
+        apply_sobel_filter_flattened_array(buffer, width, height, nb_images_local);
+        MPI_Send(buffer, nb_images_local * nb_pixels, MPI_INT, root_process, 0, MPI_COMM_WORLD);
         free(buffer);
     }
 
-    if (rank == root_process) {
-        // MPI_Datatype subtype[size-1];
-        // images_per_rank = image_information%size;
-        // int subarray_size[3] = {images_per_rank, image_information[1], image_information[2]};
-        // int starting_image = images_per_rank*(rank-1);
-        // int subarray_start[3] = {starting_image, 0, 0};
-        // MPI_Type_create_subarrray(3, array_size, subarray_size, subarray_start, MPI_ORDER_C, MPI_INT, &subtype);
-        // MPI_Type_commit(&subtype);
-        // MPI_Datatype subtype;
-    }
     gettimeofday(&t1, NULL);
 
-    // /* Apply blur filter with convergence value */
-    // apply_blur_filter(image, 5, 20);
-
-    // /* Apply sobel filter on pixels */
-    // apply_sobel_filter(image);
-
     if (rank != root_process) {
+        free(image_information);
         MPI_Finalize();
         return 0;
     }
-
-    matrix_to_gif(image, gif_matrix);
+    flattened_matrix_to_gif(image, flattened_gif_matrix);
     /* FILTER Timer stop */
     gettimeofday(&t2, NULL);
 
@@ -1013,9 +891,6 @@ int main(int argc, char** argv)
 
     duration = (t2.tv_sec - t1.tv_sec) + ((t2.tv_usec - t1.tv_usec) / 1e6);
     free(image_information);
-    if (rank == root_process) {
-        free(serialized_image);
-    }
     printf("Export done in %lf s in file %s\n", duration, output_filename);
     MPI_Finalize();
 

@@ -2,10 +2,10 @@ SRC_DIR=src
 HEADER_DIR=include
 OBJ_DIR=obj
 
-MPI_CC=mpicc  # Use mpicc as the MPI wrapper compiler
+MPI_CC=mpicc   # Use mpicc as the MPI wrapper compiler
 CC=gcc
-CFLAGS=-O3 -I$(HEADER_DIR)
-MPI_CFLAGS=-O3 -I$(HEADER_DIR)  # MPI-specific flags
+CFLAGS=-O0 -fsanitize=address -ggdb -Wall -Wextra -I$(HEADER_DIR) 
+MPI_CFLAGS=-O0 -fsanitize=address -ggdb -Wall -Wextra -I$(HEADER_DIR)  # MPI-specific flags
 LDFLAGS=-lm
 
 SRC= dgif_lib.c \
