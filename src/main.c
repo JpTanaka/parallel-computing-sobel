@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <sys/time.h>
 
+
+// #include "cuda_functions.h"
 #include "gif_lib.h"
 
  /* Represent one pixel from the image */
@@ -479,13 +481,9 @@ void apply_blur_filter_flattened_array(int* image, int size, int threshold, int 
             }
         }
 
-        float max_diff = 0;
         for (j = 1; j < height - 1; j++) {
             for (k = 1; k < width - 1; k++) {
                 float diff = new_image[CONV(j, k, width)] - image[i * width * height + CONV(j, k, width)];
-                if (diff > max_diff) {
-                    max_diff = diff;
-                }
                 if (diff > threshold || -diff > threshold) {
                     end = 0;
                 }
@@ -777,14 +775,23 @@ long long int* get_image_offsets(int* widths, int* heights, int n_images) {
         current_offset += (long long int)widths[i] * heights[i];
     }
     offsets[n_images] = current_offset;
+
     return offsets;
 }
 
 void process_images(int* buffer, int n_images, int* widths, int* heights){
     int offset = 0;
+    int use_cuda = 1;
     for(int i = 0; i < n_images; i++) {
-        apply_blur_filter_flattened_array(buffer + offset, 5, 20, widths[i], heights[i]);
-        apply_sobel_filter_flattened_array(buffer + offset, widths[i], heights[i]);
+        if(use_cuda) {
+            apply_blur_filter_cuda(buffer+offset, 20, 5, widths[i], heights[i]);
+            apply_sobel_filter_cuda(buffer+offset, widths[i], heights[i]);
+
+        }
+        else{
+            apply_blur_filter_flattened_array(buffer + offset, 5, 20, widths[i], heights[i]);
+            apply_sobel_filter_flattened_array(buffer + offset, widths[i], heights[i]);
+        }
         offset+= widths[i]*heights[i];
     }
 }
@@ -798,7 +805,6 @@ int get_number_images_to_rank(int rank, int n_images, int size){
 void flattened_matrix_to_gif(animated_gif* image, int* flattened_matrix) {
     int idx = 0;
     for (int i = 0; i < image->n_images; i++) {
-        // image->p[i] = malloc(image->width[i] * image->height[i] * sizeof(pixel));
         for (int j = 0; j < image->height[i]; j++) {
             for (int k = 0; k < image->width[i]; k++) {
                 image->p[i][CONV(j, k, image->width[i])].r = flattened_matrix[idx];
@@ -828,7 +834,6 @@ int main(int argc, char** argv)
     int root_process = 0;
     int rank, size;
     FILE* fptr;
-    int*** gif_matrix;
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -868,8 +873,10 @@ int main(int argc, char** argv)
     MPI_Bcast(widths, n_images, MPI_INT, root_process, MPI_COMM_WORLD);
     MPI_Bcast(heights, n_images, MPI_INT, root_process, MPI_COMM_WORLD);
     long long int* offsets = get_image_offsets(widths, heights, n_images);
+    gettimeofday(&t1, NULL);
     
     if (rank == root_process) {
+
         int count = 0;
         for (int i = 1; i < size; i++) {
             int nb_images = get_number_images_to_rank(i, n_images, size);
@@ -898,8 +905,8 @@ int main(int argc, char** argv)
         MPI_Send(buffer, nb_pixels, MPI_INT, root_process, 0, MPI_COMM_WORLD);
         free(buffer);
     }
+    free(offsets);
 
-    gettimeofday(&t1, NULL);
 
     if (rank != root_process) {
         free(image_information);
@@ -907,6 +914,7 @@ int main(int argc, char** argv)
         return 0;
     }
     flattened_matrix_to_gif(image, flattened_gif_matrix);
+    free(flattened_gif_matrix);
     /* FILTER Timer stop */
     gettimeofday(&t2, NULL);
 
@@ -917,8 +925,8 @@ int main(int argc, char** argv)
     fptr = fopen("perf.log", "a");
     fprintf(fptr, "%d %d %f s\n", image->width[0], image->height[0], duration);
     fclose(fptr);
-
     /* EXPORT Timer start */
+
     gettimeofday(&t1, NULL);
 
     /* Store file from array of pixels to GIF file */
