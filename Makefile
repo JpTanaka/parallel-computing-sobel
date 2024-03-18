@@ -7,7 +7,7 @@ CC=gcc
 NVCC=nvcc  # Use nvcc for CUDA compilation
 
 CFLAGS=-O3   -I$(HEADER_DIR) 
-MPI_CFLAGS=-O3  -I$(HEADER_DIR)  # MPI-specific flags
+MPI_CFLAGS=-O3 -fopenmp -I$(HEADER_DIR)  # MPI-specific flags
 # MPI_CFLAGS=-O3 -fsanitize=address -I$(HEADER_DIR)  # MPI-specific flags
 CUDA_CFLAGS=-O3  -I$(HEADER_DIR) -I/usr/local/cuda/include -L/usr/local/cuda/lib64 -lcudart -lcuda
 LDFLAGS=-lm 

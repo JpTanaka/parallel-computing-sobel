@@ -149,39 +149,17 @@ __global__ void sobel_filter_kernel(int* image, int* sobel, int width, int heigh
 extern "C" void apply_sobel_filter_cuda(int* image, int width, int height) {
     int* d_image = NULL;
     int* d_sobel = NULL;
-    cudaError_t cuda_error = cudaMalloc((void**)&d_image, width * height * sizeof(int));
-    if (cuda_error != cudaSuccess) {
-        fprintf(stderr, "(cudaMalloc d_image): %s\n", cudaGetErrorString(cuda_error));
-        return;
-    }
-
-    cuda_error = cudaMalloc((void**)&d_sobel, width * height * sizeof(int));
-    if (cuda_error != cudaSuccess) {
-        fprintf(stderr, "(cudaMalloc d_sobel): %s\n", cudaGetErrorString(cuda_error));
-        cudaFree(d_image);  
-        return;
-    }
-
-    cuda_error = cudaMemcpy(d_image, image, width * height * sizeof(int), cudaMemcpyHostToDevice);
-    if (cuda_error != cudaSuccess) {
-        fprintf(stderr, "(cudaMemcpy host to device): %s\n", cudaGetErrorString(cuda_error));
-        cudaFree(d_image);  
-        cudaFree(d_sobel);  
-        return;
-    }
+    cudaMalloc((void**)&d_image, width * height * sizeof(int));
+    cudaMalloc((void**)&d_sobel, width * height * sizeof(int));
+    cudaMemcpy(d_image, image, width * height * sizeof(int), cudaMemcpyHostToDevice);
 
     dim3 block_size(32, 32);
     // gridSize must be s.t. we can fit the whole image
     dim3 grid_size((width + block_size.x - 1) / block_size.x + 1, (height + block_size.y - 1) / block_size.y + 1);
     sobel_filter_kernel<<<grid_size, block_size>>>(d_image, d_sobel, width, height);
     cudaFree(d_image);
-    cuda_error = cudaMemcpy(image, d_sobel, width*height * sizeof(int), cudaMemcpyDeviceToHost);
-    if (cuda_error != cudaSuccess) {
-        fprintf(stderr, "(cudaMemcpy device to host): %s\n", cudaGetErrorString(cuda_error));
-        cudaFree(d_image);  
-        cudaFree(d_sobel);  
-        return;
-    }
+    cudaMemcpy(image, d_sobel, width*height * sizeof(int), cudaMemcpyDeviceToHost);
+
     cudaFree(d_sobel);
 }
 
