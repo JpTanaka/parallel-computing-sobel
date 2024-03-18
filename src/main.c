@@ -10,7 +10,7 @@
 #include <sys/time.h>
 
 
-// #include "cuda_functions.h"
+ // #include "cuda_functions.h"
 #include "gif_lib.h"
 
  /* Represent one pixel from the image */
@@ -730,10 +730,10 @@ int* gif_to_flatten_array(const animated_gif* image, int num_images)
 {
 
     int nb_pixels = 0;
-    for(int i = 0; i < image->n_images; i++) {
-        nb_pixels += image->width[i]*image->height[i]; 
+    for (int i = 0; i < image->n_images; i++) {
+        nb_pixels += image->width[i] * image->height[i];
     }
-    int idx=0;
+    int idx = 0;
     int* array = malloc(nb_pixels * sizeof(int));
     for (int i = 0; i < num_images; i++) {
         for (int j = 0; j < image->height[i]; j++) {
@@ -761,8 +761,8 @@ int get_first_image_of_rank(int rank, int n_images, int size) {
     int remainder_images = n_images % (size - 1);
     int current_image = 0;
     for (int i = 1; i < rank; i++) {
-            int nb_images = images_per_rank + (remainder_images >= i ? 1 : 0);
-            current_image+=nb_images;
+        int nb_images = images_per_rank + (remainder_images >= i ? 1 : 0);
+        current_image += nb_images;
     }
     return current_image;
 }
@@ -779,24 +779,23 @@ long long int* get_image_offsets(int* widths, int* heights, int n_images) {
     return offsets;
 }
 
-void process_images(int* buffer, int n_images, int* widths, int* heights){
+void process_images(int* buffer, int n_images, int* widths, int* heights, int use_cuda) {
     int offset = 0;
-    int use_cuda = 1;
-    for(int i = 0; i < n_images; i++) {
-        if(use_cuda) {
-            apply_blur_filter_cuda(buffer+offset, 20, 5, widths[i], heights[i]);
-            apply_sobel_filter_cuda(buffer+offset, widths[i], heights[i]);
+    for (int i = 0; i < n_images; i++) {
+        if (use_cuda) {
+            apply_blur_filter_cuda(buffer + offset, 20, 5, widths[i], heights[i]);
+            apply_sobel_filter_cuda(buffer + offset, widths[i], heights[i]);
 
         }
-        else{
+        else {
             apply_blur_filter_flattened_array(buffer + offset, 5, 20, widths[i], heights[i]);
             apply_sobel_filter_flattened_array(buffer + offset, widths[i], heights[i]);
         }
-        offset+= widths[i]*heights[i];
+        offset += widths[i] * heights[i];
     }
 }
 
-int get_number_images_to_rank(int rank, int n_images, int size){
+int get_number_images_to_rank(int rank, int n_images, int size) {
     int images_per_rank = (n_images / (size - 1));
     int remainder_images = n_images % (size - 1);
     return images_per_rank + (remainder_images >= rank ? 1 : 0);
@@ -816,98 +815,163 @@ void flattened_matrix_to_gif(animated_gif* image, int* flattened_matrix) {
     }
 }
 
-/*
- * Main entry point
- */
-int main(int argc, char** argv)
-{
-    char* input_filename;
-    char* output_filename;
+void export_file(char* output_filename, animated_gif* image) {
+    struct timeval t1, t2;
+
+    gettimeofday(&t1, NULL);
+    if (!store_pixels(output_filename, image)) {
+        return 1;
+    }
+    gettimeofday(&t2, NULL);
+
+    float duration = (t2.tv_sec - t1.tv_sec) + ((t2.tv_usec - t1.tv_usec) / 1e6);
+    printf("Export done in %lf s in file %s\n", duration, output_filename);
+
+}
+
+
+animated_gif* create_dumb_image(int n_images, int width, int height) {
+    srand(1);
+
+    animated_gif* image = malloc(sizeof(animated_gif));
+    if (image == NULL) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return NULL;
+    }
+
+    image->n_images = n_images;
+    image->width = malloc(n_images * sizeof(int));
+    image->height = malloc(n_images * sizeof(int));
+    image->p = malloc(n_images * sizeof(pixel*));
+    if (image->width == NULL || image->height == NULL || image->p == NULL) {
+        fprintf(stderr, "Memory allocation failed\n");
+        free(image->width);
+        free(image->height);
+        free(image->p);
+        free(image);
+        return NULL;
+    }
+
+    for (int i = 0; i < n_images; i++) {
+        image->width[i] = width;
+        image->height[i] = height;
+
+        image->p[i] = malloc(width * height * sizeof(pixel));
+
+        if (image->p[i] == NULL) {
+            fprintf(stderr, "Memory allocation failed\n");
+            for (int j = 0; j < i; j++) {
+                free(image->p[j]);
+            }
+            free(image->width);
+            free(image->height);
+            free(image->p);
+            free(image);
+            return NULL;
+        }
+        for (int j = 0; j < width * height; j++) {
+            image->p[i][j].r = rand() % 256;
+            image->p[i][j].g = rand() % 256;
+            image->p[i][j].b = rand() % 256;
+        }
+    }
+
+    return image;
+}
+
+animated_gif* load_image(int benchmark, char* input_filename, int n_images, int width, int height) {
+    struct timeval t1, t2;
+    animated_gif* image;
+    gettimeofday(&t1, NULL);
+    if (benchmark) {
+        printf("Creating dumb gif with: \n n_images: %d \n width: %d \n height: %d\n", n_images, width, height);
+        image = create_dumb_image(n_images, width, height);
+    }
+    else {
+        image = load_pixels(input_filename);
+        if (image == NULL) {
+            return 1;
+        }
+        gettimeofday(&t2, NULL);
+        float duration = (t2.tv_sec - t1.tv_sec) + ((t2.tv_usec - t1.tv_usec) / 1e6);
+        printf("GIF loaded from file %s with %d image(s) in %lf s\n",
+            input_filename, image->n_images, duration);
+    }
+    return image;
+}
+
+
+int run(int argc, char** argv, int n_images, int width, int height, char* input_filename, char* output_filename, int benchmark) {
     animated_gif* image = NULL;
-    int n_images;
     int* widths;
     int* heights;
+    int use_mpi = 1;
+    int use_omp;
+    int use_cuda = 1;
+
 
     int* image_information = malloc(sizeof(int) * 3);
     struct timeval t1, t2;
     double duration;
     int root_process = 0;
     int rank, size;
-    FILE* fptr;
+    int* flattened_gif_matrix;
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-
-    /* Check command-line arguments */
-    if (argc < 3) {
-        fprintf(stderr, "Usage: %s input.gif output.gif \n", argv[0]);
-        return 1;
-    }
-    input_filename = argv[1];
-    output_filename = argv[2];
-
-    int* flattened_gif_matrix;
     if (rank == root_process) {
-        /* IMPORT Timer start */
-        gettimeofday(&t1, NULL);
-        /* Load file and store the pixels in array */
-        image = load_pixels(input_filename);
-        if (image == NULL) {
-            return 1;
-        }
-        /* IMPORT Timer stop */
-        gettimeofday(&t2, NULL);
-        duration = (t2.tv_sec - t1.tv_sec) + ((t2.tv_usec - t1.tv_usec) / 1e6);
-        printf("GIF loaded from file %s with %d image(s) in %lf s\n",
-            input_filename, image->n_images, duration);
+        image = load_image(benchmark, input_filename, n_images, width, height);
         n_images = image->n_images;
+        gettimeofday(&t1, NULL);
         flattened_gif_matrix = gif_to_flatten_array(image, image->n_images);
+        if (!use_mpi) {
+            process_images(flattened_gif_matrix, n_images, widths, heights, use_cuda);
+        }
     }
-    MPI_Bcast(&n_images, 1, MPI_INT, root_process, MPI_COMM_WORLD);
-    widths = malloc(n_images*sizeof(int));
-    heights = malloc(n_images*sizeof(int));
-    if(rank==root_process) {
-        widths = image->width;
-        heights = image->height;
-    }
-    MPI_Bcast(widths, n_images, MPI_INT, root_process, MPI_COMM_WORLD);
-    MPI_Bcast(heights, n_images, MPI_INT, root_process, MPI_COMM_WORLD);
-    long long int* offsets = get_image_offsets(widths, heights, n_images);
-    gettimeofday(&t1, NULL);
-    
-    if (rank == root_process) {
+    if (use_mpi) {
+        MPI_Bcast(&n_images, 1, MPI_INT, root_process, MPI_COMM_WORLD);
+        widths = malloc(n_images * sizeof(int));
+        heights = malloc(n_images * sizeof(int));
+        if (rank == root_process) {
+            widths = image->width;
+            heights = image->height;
+        }
+        MPI_Bcast(widths, n_images, MPI_INT, root_process, MPI_COMM_WORLD);
+        MPI_Bcast(heights, n_images, MPI_INT, root_process, MPI_COMM_WORLD);
+        long long int* offsets = get_image_offsets(widths, heights, n_images);
 
-        int count = 0;
-        for (int i = 1; i < size; i++) {
-            int nb_images = get_number_images_to_rank(i, n_images, size);
-            if (nb_images == 0) {
-                break;
+        if (rank == root_process) {
+            int count = 0;
+            for (int i = 1; i < size; i++) {
+                int nb_images = get_number_images_to_rank(i, n_images, size);
+                if (nb_images == 0) {
+                    break;
+                }
+                int current_image = get_first_image_of_rank(i, n_images, size);
+                int nb_pixels = offsets[current_image + nb_images] - offsets[current_image];
+                MPI_Sendrecv(flattened_gif_matrix + offsets[current_image], nb_pixels, MPI_INT, i, 0,
+                    flattened_gif_matrix + offsets[current_image], nb_pixels, MPI_INT, i, 0,
+                    MPI_COMM_WORLD, NULL);
             }
-            int current_image = get_first_image_of_rank(i, n_images, size);
-            int nb_pixels = offsets[current_image+nb_images]-offsets[current_image];
-            MPI_Sendrecv(flattened_gif_matrix + offsets[current_image], nb_pixels, MPI_INT, i, 0,
-                flattened_gif_matrix + offsets[current_image], nb_pixels, MPI_INT, i, 0,
-                MPI_COMM_WORLD, NULL);
         }
-    }
-    else {
-        int nb_images_local = get_number_images_to_rank(rank, n_images, size);
-        if (nb_images_local == 0) {
-            free(image_information);
-            MPI_Finalize();
-            return 0;
+        else {
+            int nb_images_local = get_number_images_to_rank(rank, n_images, size);
+            if (nb_images_local == 0) {
+                free(image_information);
+                free(offsets);
+                MPI_Finalize();
+                return 0;
+            }
+            int first_image = get_first_image_of_rank(rank, n_images, size);
+            int nb_pixels = offsets[first_image + nb_images_local] - offsets[first_image];
+            int* buffer = (int*)malloc(nb_pixels * sizeof(int));
+            MPI_Recv(buffer, nb_pixels, MPI_INT, root_process, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            process_images(buffer, nb_images_local, widths + first_image, heights + first_image, use_cuda);
+            MPI_Send(buffer, nb_pixels, MPI_INT, root_process, 0, MPI_COMM_WORLD);
+            free(buffer);
         }
-        int first_image = get_first_image_of_rank(rank, n_images, size);
-        int nb_pixels = offsets[first_image+nb_images_local]-offsets[first_image];
-        int* buffer = (int*)malloc(nb_pixels*sizeof(int));
-        MPI_Recv(buffer, nb_pixels, MPI_INT, root_process, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        process_images(buffer, nb_images_local, widths+first_image, heights+first_image);
-        MPI_Send(buffer, nb_pixels, MPI_INT, root_process, 0, MPI_COMM_WORLD);
-        free(buffer);
+        free(offsets);
     }
-    free(offsets);
-
-
     if (rank != root_process) {
         free(image_information);
         MPI_Finalize();
@@ -915,32 +979,51 @@ int main(int argc, char** argv)
     }
     flattened_matrix_to_gif(image, flattened_gif_matrix);
     free(flattened_gif_matrix);
-    /* FILTER Timer stop */
     gettimeofday(&t2, NULL);
-
     duration = (t2.tv_sec - t1.tv_sec) + ((t2.tv_usec - t1.tv_usec) / 1e6);
 
     printf("SOBEL done in %lf s\n", duration);
 
-    fptr = fopen("perf.log", "a");
-    fprintf(fptr, "%d %d %f s\n", image->width[0], image->height[0], duration);
+    FILE* fptr;
+    fptr = fopen("runs.log", "a");
+    fprintf(fptr, "%d, %d, %d, %d, %d, %d, %d, %f\n", size, image->n_images, image->width[0], image->height[0], use_mpi, use_omp, use_cuda, duration);
     fclose(fptr);
-    /* EXPORT Timer start */
+    if (!benchmark) {
+        export_file(output_filename, image);
+    }
+    free(image_information);
+    MPI_Finalize();
+}
 
-    gettimeofday(&t1, NULL);
+/*
+ * Main entry point
+ */
+int main(int argc, char** argv)
+{
 
-    /* Store file from array of pixels to GIF file */
-    if (!store_pixels(output_filename, image)) {
+    char* input_filename;
+    char* output_filename;
+    int benchmark = 0;
+    int benchmark_width;
+    int benchmark_height;
+    int benchmark_n_images;
+
+    /* Check command-line arguments */
+    if (argc < 3) {
+        fprintf(stderr, "%s input_filename, output_filename", argv[0]);
         return 1;
     }
-
-    /* EXPORT Timer stop */
-    gettimeofday(&t2, NULL);
-
-    duration = (t2.tv_sec - t1.tv_sec) + ((t2.tv_usec - t1.tv_usec) / 1e6);
-    free(image_information);
-    printf("Export done in %lf s in file %s\n", duration, output_filename);
-    MPI_Finalize();
-
+    if (argc == 3) {
+        input_filename = argv[1];
+        output_filename = argv[2];
+    }
+    if (argc == 4) {
+        printf("Benchmark mode\n");
+        benchmark_n_images = atoi(argv[1]);
+        benchmark_width = atoi(argv[2]);
+        benchmark_height = atoi(argv[3]);
+        benchmark = 1;
+    }
+    run(argc, argv, benchmark_n_images, benchmark_width, benchmark_height, input_filename, output_filename, benchmark);
     return 0;
 }
