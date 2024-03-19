@@ -9,9 +9,10 @@
 #include <omp.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <time.h>
 
 
- // #include "cuda_functions.h"
+ #include "cuda_functions.h"
 #include "gif_lib.h"
 
  /* Represent one pixel from the image */
@@ -497,189 +498,10 @@ void apply_blur_filter_flattened_array(int* image, int size, int threshold, int 
 }
 
 
-void apply_blur_filter_flattened_array_omp(int* image, int size, int threshold, int width, int height)
-{
-    int end;
-    int i = 0;
-
-    int* new_image = (int*)malloc(width * height * sizeof(int));
-    do {
-        end = 1;
-        for (int j = 0; j < height - 1; j++) {
-            for (int k = 0; k < width - 1; k++) {
-                new_image[CONV(j, k, width)] = image[i * width * height + CONV(j, k, width)];
-            }
-        }
-        /* Apply blur on top part of image (10%) */
-        for (int j = size; j < height / 10 - size; j++) {
-            for (int k = size; k < width - size; k++) {
-                int stencil_j, stencil_k;
-                int t = 0;
-
-                for (stencil_j = -size; stencil_j <= size; stencil_j++) {
-                    for (stencil_k = -size; stencil_k <= size; stencil_k++) {
-                        t += image[i * width * height + CONV(j + stencil_j, k + stencil_k, width)];
-                    }
-                }
-
-                new_image[CONV(j, k, width)] = t / ((2 * size + 1) * (2 * size + 1));
-            }
-        }
-
-        /* Copy the middle part of the image */
-        for (int j = (height / 10 - size); j < (int)(height * 0.9) + size; j++) {
-            for (int k = size; k < width - size; k++) {
-                new_image[CONV(j, k, width)] = image[i * width * height + CONV(j, k, width)];
-            }
-        }
-
-        /* Apply blur on the bottom part of the image (10%) */
-        for (int j = height * 0.9 + size; j < height - size; j++) {
-            for (int k = size; k < width - size; k++) {
-                int stencil_j, stencil_k;
-                int t = 0;
-
-                for (stencil_j = -size; stencil_j <= size; stencil_j++) {
-                    for (stencil_k = -size; stencil_k <= size; stencil_k++) {
-                        t += image[i * width * height + CONV(j + stencil_j, k + stencil_k, width)];
-                    }
-                }
-
-                new_image[CONV(j, k, width)] = t / ((2 * size + 1) * (2 * size + 1));
-            }
-        }
-
-        for (int j = 1; j < height - 1; j++) {
-            for (int k = 1; k < width - 1; k++) {
-                float diff = new_image[CONV(j, k, width)] - image[i * width * height + CONV(j, k, width)];
-                if (diff > threshold || -diff > threshold) {
-                    end = 0;
-                }
-                image[i * width * height + CONV(j, k, width)] = new_image[CONV(j, k, width)];
-            }
-        }
-    } while (threshold > 0 && !end);
-
-    free(new_image);
-}
-
-
 
 #define CONV(l, c, nb_c) \
     (l) * (nb_c) + (c)
 
-void apply_blur_filter(animated_gif* image, int size, int threshold)
-{
-    int i, j, k;
-    int width, height;
-    int end = 0;
-
-    pixel** p;
-    pixel* new;
-
-    /* Get the pixels of all images */
-    p = image->p;
-
-    /* Process all images */
-    for (i = 0; i < image->n_images; i++) {
-        width = image->width[i];
-        height = image->height[i];
-
-        /* Allocate array of new pixels */
-        new = (pixel*)malloc(width * height * sizeof(pixel));
-
-        /* Perform at least one blur iteration */
-        do {
-            end = 1;
-
-            for (j = 0; j < height - 1; j++) {
-                for (k = 0; k < width - 1; k++) {
-                    new[CONV(j, k, width)].r = p[i][CONV(j, k, width)].r;
-                    new[CONV(j, k, width)].g = p[i][CONV(j, k, width)].g;
-                    new[CONV(j, k, width)].b = p[i][CONV(j, k, width)].b;
-                }
-            }
-
-            /* Apply blur on top part of image (10%) */
-            for (j = size; j < height / 10 - size; j++) {
-                for (k = size; k < width - size; k++) {
-                    int stencil_j, stencil_k;
-                    int t = 0;
-                    int t_g = 0;
-                    int t_b = 0;
-
-                    for (stencil_j = -size; stencil_j <= size; stencil_j++) {
-                        for (stencil_k = -size; stencil_k <= size; stencil_k++) {
-                            t += p[i][CONV(j + stencil_j, k + stencil_k, width)].r;
-                            t_g += p[i][CONV(j + stencil_j, k + stencil_k, width)].g;
-                            t_b += p[i][CONV(j + stencil_j, k + stencil_k, width)].b;
-                        }
-                    }
-
-                    new[CONV(j, k, width)].r = t / ((2 * size + 1) * (2 * size + 1));
-                    new[CONV(j, k, width)].g = t_g / ((2 * size + 1) * (2 * size + 1));
-                    new[CONV(j, k, width)].b = t_b / ((2 * size + 1) * (2 * size + 1));
-                }
-            }
-
-            /* Copy the middle part of the image */
-            for (j = height / 10 - size; j < height * 0.9 + size; j++) {
-                for (k = size; k < width - size; k++) {
-                    new[CONV(j, k, width)].r = p[i][CONV(j, k, width)].r;
-                    new[CONV(j, k, width)].g = p[i][CONV(j, k, width)].g;
-                    new[CONV(j, k, width)].b = p[i][CONV(j, k, width)].b;
-                }
-            }
-
-            /* Apply blur on the bottom part of the image (10%) */
-            for (j = height * 0.9 + size; j < height - size; j++) {
-                for (k = size; k < width - size; k++) {
-                    int stencil_j, stencil_k;
-                    int t = 0;
-                    int t_g = 0;
-                    int t_b = 0;
-
-                    for (stencil_j = -size; stencil_j <= size; stencil_j++) {
-                        for (stencil_k = -size; stencil_k <= size; stencil_k++) {
-                            t += p[i][CONV(j + stencil_j, k + stencil_k, width)].r;
-                            t_g += p[i][CONV(j + stencil_j, k + stencil_k, width)].g;
-                            t_b += p[i][CONV(j + stencil_j, k + stencil_k, width)].b;
-                        }
-                    }
-
-                    new[CONV(j, k, width)].r = t / ((2 * size + 1) * (2 * size + 1));
-                    new[CONV(j, k, width)].g = t_g / ((2 * size + 1) * (2 * size + 1));
-                    new[CONV(j, k, width)].b = t_b / ((2 * size + 1) * (2 * size + 1));
-                }
-            }
-
-            for (j = 1; j < height - 1; j++) {
-                for (k = 1; k < width - 1; k++) {
-
-                    float diff;
-                    float diff_g;
-                    float diff_b;
-
-                    diff = (new[CONV(j, k, width)].r - p[i][CONV(j, k, width)].r);
-                    diff_g = (new[CONV(j, k, width)].g - p[i][CONV(j, k, width)].g);
-                    diff_b = (new[CONV(j, k, width)].b - p[i][CONV(j, k, width)].b);
-
-                    if (diff > threshold || -diff > threshold
-                        || diff_g > threshold || -diff_g > threshold
-                        || diff_b > threshold || -diff_b > threshold) {
-                        end = 0;
-                    }
-
-                    p[i][CONV(j, k, width)].r = new[CONV(j, k, width)].r;
-                    p[i][CONV(j, k, width)].g = new[CONV(j, k, width)].g;
-                    p[i][CONV(j, k, width)].b = new[CONV(j, k, width)].b;
-                }
-            }
-
-        } while (threshold > 0 && !end);
-        free(new);
-    }
-}
 
 void apply_sobel_filter_flattened_array(int* image, int width, int height)
 {
@@ -726,121 +548,6 @@ void apply_sobel_filter_flattened_array(int* image, int width, int height)
     }
     free(sobel);
 }
-void apply_sobel_filter_flattened_array_omp(int* image, int width, int height)
-{
-    int* sobel = (int*)malloc(width * height * sizeof(int));
-    #pragma omp parallel
-    {
-    #pragma omp for collapse(2)
-    for (int j = 1; j < height - 1; j++) {
-        for (int k = 1; k < width - 1; k++) {
-            int pixel_no, pixel_n, pixel_ne;
-            int pixel_so, pixel_s, pixel_se;
-            int pixel_o, pixel_e;
-
-            float deltaX;
-            float deltaY;
-            float val;
-
-            pixel_no = image[CONV(j - 1, k - 1, width)];
-            pixel_n = image[CONV(j - 1, k, width)];
-            pixel_ne = image[CONV(j - 1, k + 1, width)];
-            pixel_so = image[CONV(j + 1, k - 1, width)];
-            pixel_s = image[CONV(j + 1, k, width)];
-            pixel_se = image[CONV(j + 1, k + 1, width)];
-            pixel_o = image[CONV(j, k - 1, width)];
-            pixel_e = image[CONV(j, k + 1, width)];
-
-            deltaX = -pixel_no + pixel_ne - 2 * pixel_o + 2 * pixel_e - pixel_so + pixel_se;
-            deltaY = pixel_se + 2 * pixel_s + pixel_so - pixel_ne - 2 * pixel_n - pixel_no;
-
-            val = sqrt(deltaX * deltaX + deltaY * deltaY) / 4;
-
-            if (val > 50) {
-                sobel[CONV(j, k, width)] = 255;
-            }
-            else {
-                sobel[CONV(j, k, width)] = 0;
-            }
-        }
-    }
-    for (int j = 1; j < height - 1; j++) {
-        for (int k = 1; k < width - 1; k++) {
-            image[CONV(j, k, width)] = sobel[CONV(j, k, width)];
-        }
-    }
-    }
-    free(sobel);
-}
-
-
-
-void apply_sobel_filter(animated_gif* image)
-{
-    int i, j, k;
-    int width, height;
-
-    pixel** p;
-
-    p = image->p;
-
-    for (i = 0; i < image->n_images; i++) {
-        width = image->width[i];
-        height = image->height[i];
-
-        pixel* sobel;
-
-        sobel = (pixel*)malloc(width * height * sizeof(pixel));
-
-        for (j = 1; j < height - 1; j++) {
-            for (k = 1; k < width - 1; k++) {
-                int pixel_blue_no, pixel_blue_n, pixel_blue_ne;
-                int pixel_blue_so, pixel_blue_s, pixel_blue_se;
-                int pixel_blue_o, pixel_blue, pixel_blue_e;
-
-                float deltaX_blue;
-                float deltaY_blue;
-                float val_blue;
-
-                pixel_blue_no = p[i][CONV(j - 1, k - 1, width)].b;
-                pixel_blue_n = p[i][CONV(j - 1, k, width)].b;
-                pixel_blue_ne = p[i][CONV(j - 1, k + 1, width)].b;
-                pixel_blue_so = p[i][CONV(j + 1, k - 1, width)].b;
-                pixel_blue_s = p[i][CONV(j + 1, k, width)].b;
-                pixel_blue_se = p[i][CONV(j + 1, k + 1, width)].b;
-                pixel_blue_o = p[i][CONV(j, k - 1, width)].b;
-                pixel_blue = p[i][CONV(j, k, width)].b;
-                pixel_blue_e = p[i][CONV(j, k + 1, width)].b;
-
-                deltaX_blue = -pixel_blue_no + pixel_blue_ne - 2 * pixel_blue_o + 2 * pixel_blue_e - pixel_blue_so + pixel_blue_se;
-
-                deltaY_blue = pixel_blue_se + 2 * pixel_blue_s + pixel_blue_so - pixel_blue_ne - 2 * pixel_blue_n - pixel_blue_no;
-
-                val_blue = sqrt(deltaX_blue * deltaX_blue + deltaY_blue * deltaY_blue) / 4;
-
-                if (val_blue > 50) {
-                    sobel[CONV(j, k, width)].r = 255;
-                    sobel[CONV(j, k, width)].g = 255;
-                    sobel[CONV(j, k, width)].b = 255;
-                }
-                else {
-                    sobel[CONV(j, k, width)].r = 0;
-                    sobel[CONV(j, k, width)].g = 0;
-                    sobel[CONV(j, k, width)].b = 0;
-                }
-            }
-        }
-
-        for (j = 1; j < height - 1; j++) {
-            for (k = 1; k < width - 1; k++) {
-                p[i][CONV(j, k, width)].r = sobel[CONV(j, k, width)].r;
-                p[i][CONV(j, k, width)].g = sobel[CONV(j, k, width)].g;
-                p[i][CONV(j, k, width)].b = sobel[CONV(j, k, width)].b;
-            }
-        }
-        free(sobel);
-    }
-}
 
 int* gif_to_flatten_array(const animated_gif* image, int num_images)
 {
@@ -871,7 +578,7 @@ int* gif_to_flatten_array(const animated_gif* image, int num_images)
 
 int get_first_image_of_rank(int rank, int n_images, int size) {
     if (rank == 0) {
-        return NULL;
+        return -1;
     }
     int images_per_rank = (n_images / (size - 1));
     int remainder_images = n_images % (size - 1);
@@ -896,11 +603,6 @@ long long int* get_image_offsets(int* widths, int* heights, int n_images) {
 }
 
 void process_one_image(int* buffer, int width, int height, int use_cuda, int use_omp) {
-    if(use_omp) {
-            apply_blur_filter_flattened_array_omp(buffer, 5, 20, width, height);
-            apply_sobel_filter_flattened_array_omp(buffer, width, height);
-
-    }
     if (use_cuda) {
             apply_blur_filter_cuda(buffer, 20, 5, width, height);
             apply_sobel_filter_cuda(buffer, width, height);
@@ -913,11 +615,19 @@ void process_one_image(int* buffer, int width, int height, int use_cuda, int use
 
 void process_images(int* buffer, int n_images, int* widths, int* heights, int use_cuda, int use_omp) {
     int offset = 0;
-        #pragma parallel for schedule(static) if(use_omp)
+    if(use_omp) {
+         #pragma omp parallel for
         for (int i = 0; i < n_images; i++) {
-        process_one_image(buffer+offset, widths[i], heights[i], use_cuda, use_omp);
-        offset += widths[i] * heights[i];
+            process_one_image(buffer+offset, widths[i], heights[i], use_cuda, use_omp);
+            offset += widths[i] * heights[i];
         }
+    }
+    else{ 
+        for (int i = 0; i < n_images; i++) {
+            process_one_image(buffer+offset, widths[i], heights[i], use_cuda, use_omp);
+            offset += widths[i] * heights[i];
+        }
+    }
 }
 
 int get_number_images_to_rank(int rank, int n_images, int size) {
@@ -942,13 +652,11 @@ void flattened_matrix_to_gif(animated_gif* image, int* flattened_matrix) {
 
 void export_file(char* output_filename, animated_gif* image) {
     struct timeval t1, t2;
-
     gettimeofday(&t1, NULL);
     if (!store_pixels(output_filename, image)) {
-        return 1;
+        return;
     }
     gettimeofday(&t2, NULL);
-
     float duration = (t2.tv_sec - t1.tv_sec) + ((t2.tv_usec - t1.tv_usec) / 1e6);
     printf("Export done in %lf s in file %s\n", duration, output_filename);
 
@@ -1015,7 +723,7 @@ animated_gif* load_image(int benchmark, char* input_filename, int n_images, int 
     else {
         image = load_pixels(input_filename);
         if (image == NULL) {
-            return 1;
+            return NULL;
         }
         gettimeofday(&t2, NULL);
         float duration = (t2.tv_sec - t1.tv_sec) + ((t2.tv_usec - t1.tv_usec) / 1e6);
@@ -1025,36 +733,51 @@ animated_gif* load_image(int benchmark, char* input_filename, int n_images, int 
     return image;
 }
 
+void scheduler(int* use_mpi, int* use_omp, int*use_cuda, int benchmark) {
+    if (benchmark) {
+        return;
+    }
+    if(is_cuda_available()) {
+        *use_cuda = 1;
+    }
+    else {
+        *use_omp = 1;
+    }
+}
 
-int run(int argc, char** argv, int n_images, int width, int height, int N, char* input_filename, char* output_filename, int benchmark) {
+int run(int argc, char** argv, int n_images, int width, int height, int N, char* input_filename, char* output_filename, int benchmark, int use_mpi, int use_omp, int use_cuda) {
     animated_gif* image = NULL;
     int* widths;
     int* heights;
-    int use_mpi = 0;
-    int use_omp = 1;
-    int use_cuda = 0;
-    int nnodes = 0;
-
 
     int* image_information = malloc(sizeof(int) * 3);
-    struct timeval t1, t2;
-    double duration;
+    struct timeval t1, t2, t3;
+    double duration, duration2;
     int root_process = 0;
     int rank, size;
     int* flattened_gif_matrix;
+
+    scheduler(&use_mpi, &use_omp, &use_cuda, benchmark);
+    printf("Running with:\nMPI: %d\nOpenMP: %d\nCUDA: %d\n", use_mpi, use_omp, use_cuda);
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     if (rank == root_process) {
         image = load_image(benchmark, input_filename, n_images, width, height);
         n_images = image->n_images;
+        if(size > n_images) {
+            printf("Number of processes %d is greater than number of images %d. Some processes will be wasted.\n", size, n_images);
+        }
         gettimeofday(&t1, NULL);
         flattened_gif_matrix = gif_to_flatten_array(image, image->n_images);
-        if (!use_mpi) {
+        if (!use_mpi || size ==1) {
+            if(size == 1) {
+                printf("Only one process, sequential approach will be chosen \n");
+            }
             process_images(flattened_gif_matrix, n_images, image->width, image->height, use_cuda, use_omp);
         }
     }
-    if (use_mpi) {
+    if (use_mpi && size>1) {
         MPI_Bcast(&n_images, 1, MPI_INT, root_process, MPI_COMM_WORLD);
         widths = malloc(n_images * sizeof(int));
         heights = malloc(n_images * sizeof(int));
@@ -1108,11 +831,9 @@ int run(int argc, char** argv, int n_images, int width, int height, int N, char*
     gettimeofday(&t2, NULL);
     duration = (t2.tv_sec - t1.tv_sec) + ((t2.tv_usec - t1.tv_usec) / 1e6);
 
-    printf("SOBEL done in %lf s\n", duration);
-
-    char filename[100]; // Assuming a maximum length for the filename
-
-    sprintf(filename, "runs_%d_%d_%d.log",  use_mpi, use_omp, use_cuda);
+    printf("SOBEL done in %lf s \n", duration);
+    char filename[100]; 
+    sprintf(filename, "results/runs2_%d_%d_%d.log",  use_mpi, use_omp, use_cuda);
 
     FILE *fptr = fopen(filename, "a");
     fprintf(fptr, "%d, %d, %d, %d, %d, %d, %d, %d, %f\n", N, size, image->n_images, image->width[0], image->height[0], use_mpi, use_omp, use_cuda, duration);
@@ -1137,6 +858,9 @@ int main(int argc, char** argv)
     int benchmark_height;
     int benchmark_n_images;
     int N = 0;
+    int use_mpi = 0;
+    int use_omp = 0;
+    int use_cuda = 0;
 
     /* Check command-line arguments */
     if (argc < 3) {
@@ -1147,14 +871,17 @@ int main(int argc, char** argv)
         input_filename = argv[1];
         output_filename = argv[2];
     }
-    if (argc == 5) {
+    if (argc == 8) {
         printf("Benchmark mode\n");
         benchmark_n_images = atoi(argv[1]);
         benchmark_width = atoi(argv[2]);
         benchmark_height = atoi(argv[3]);
         N = atoi(argv[4]);
+        use_mpi = atoi(argv[5]);
+        use_omp = atoi(argv[6]);
+        use_cuda = atoi(argv[7]);
         benchmark = 1;
     }
-    run(argc, argv, benchmark_n_images, benchmark_width, benchmark_height, N, input_filename, output_filename, benchmark);
+    run(argc, argv, benchmark_n_images, benchmark_width, benchmark_height, N, input_filename, output_filename, benchmark, use_mpi, use_omp, use_cuda);
     return 0;
 }

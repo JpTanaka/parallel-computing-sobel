@@ -7,21 +7,20 @@
 #define CONV(l, c, nb_c) \
 (l) * (nb_c) + (c)
 
-extern "C" void test() {
+extern "C" int is_cuda_available() {
     int deviceCount;
-    cudaError_t cuda_status = cudaGetDeviceCount(&deviceCount);
-    int driverVersion;
-    cudaError_t cudaStatus2 = cudaDriverGetVersion(&driverVersion);
-
-    printf("%d", driverVersion);
-    if (cudaStatus2 != cudaSuccess) {
-        printf("driver failed: %s\n", cudaGetErrorString(cudaStatus2));
-        return;
+    cudaError_t cudaStatus = cudaGetDeviceCount(&deviceCount);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaGetDeviceCount failed: %s\n", cudaGetErrorString(cudaStatus));
+        return 0;
     }
-    if (cuda_status != cudaSuccess) {
-        printf("cudaGetDeviceCount failed: %s\n", cudaGetErrorString(cuda_status));
-        return;
+    if (deviceCount == 0) {
+        printf("No CUDA-capable devices found.\n");
+        return 0;
+    } else {
+        printf("Found %d CUDA-capable device(s).\n", deviceCount);
     }
+    return 1;
 }
 
 extern "C" void test2(int* image) {
