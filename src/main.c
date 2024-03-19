@@ -614,18 +614,17 @@ void process_one_image(int* buffer, int width, int height, int use_cuda, int use
 }
 
 void process_images(int* buffer, int n_images, int* widths, int* heights, int use_cuda, int use_omp) {
-    int offset = 0;
+    long long int* offsets = get_image_offsets(widths, heights, n_images);
+
     if(use_omp) {
          #pragma omp parallel for
         for (int i = 0; i < n_images; i++) {
-            process_one_image(buffer+offset, widths[i], heights[i], use_cuda, use_omp);
-            offset += widths[i] * heights[i];
+            process_one_image(buffer+offsets[i], widths[i], heights[i], use_cuda, use_omp);
         }
     }
     else{ 
         for (int i = 0; i < n_images; i++) {
-            process_one_image(buffer+offset, widths[i], heights[i], use_cuda, use_omp);
-            offset += widths[i] * heights[i];
+            process_one_image(buffer+offsets[i], widths[i], heights[i], use_cuda, use_omp);
         }
     }
 }
@@ -712,11 +711,11 @@ animated_gif* create_dumb_image(int n_images, int width, int height) {
     return image;
 }
 
-animated_gif* load_image(int benchmark, char* input_filename, int n_images, int width, int height) {
+animated_gif* load_image(int has_file, char* input_filename, int n_images, int width, int height) {
     struct timeval t1, t2;
     animated_gif* image;
     gettimeofday(&t1, NULL);
-    if (benchmark) {
+    if (!has_file) {
         printf("Creating dumb gif with: \n n_images: %d \n width: %d \n height: %d\n", n_images, width, height);
         image = create_dumb_image(n_images, width, height);
     }
@@ -733,19 +732,26 @@ animated_gif* load_image(int benchmark, char* input_filename, int n_images, int 
     return image;
 }
 
-void scheduler(int* use_mpi, int* use_omp, int*use_cuda, int benchmark) {
+void scheduler(int* use_mpi, int* use_omp, int*use_cuda, int benchmark, int n_images) {
     if (benchmark) {
         return;
     }
-    if(is_cuda_available()) {
+    if(n_images < 5) {
+        *use_mpi = 0;
+        *use_omp = 0;
+        *use_cuda = 0;
+    }
+    else if(is_cuda_available()) {
         *use_cuda = 1;
+        *use_omp = 1;
     }
     else {
         *use_omp = 1;
     }
+    printf("Running with:\nMPI: %d\nOpenMP: %d\nCUDA: %d\n", *use_mpi, *use_omp, *use_cuda);
 }
 
-int run(int argc, char** argv, int n_images, int width, int height, int N, char* input_filename, char* output_filename, int benchmark, int use_mpi, int use_omp, int use_cuda) {
+int run(int argc, char** argv, int n_images, int width, int height, int N, char* input_filename, char* output_filename, int benchmark, int has_file, int use_mpi, int use_omp, int use_cuda) {
     animated_gif* image = NULL;
     int* widths;
     int* heights;
@@ -757,17 +763,16 @@ int run(int argc, char** argv, int n_images, int width, int height, int N, char*
     int rank, size;
     int* flattened_gif_matrix;
 
-    scheduler(&use_mpi, &use_omp, &use_cuda, benchmark);
-    printf("Running with:\nMPI: %d\nOpenMP: %d\nCUDA: %d\n", use_mpi, use_omp, use_cuda);
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     if (rank == root_process) {
-        image = load_image(benchmark, input_filename, n_images, width, height);
+        image = load_image(has_file, input_filename, n_images, width, height);
         n_images = image->n_images;
         if(size > n_images) {
             printf("Number of processes %d is greater than number of images %d. Some processes will be wasted.\n", size, n_images);
         }
+        scheduler(&use_mpi, &use_omp, &use_cuda, benchmark, n_images);
         gettimeofday(&t1, NULL);
         flattened_gif_matrix = gif_to_flatten_array(image, image->n_images);
         if (!use_mpi || size ==1) {
@@ -833,12 +838,12 @@ int run(int argc, char** argv, int n_images, int width, int height, int N, char*
 
     printf("SOBEL done in %lf s \n", duration);
     char filename[100]; 
-    sprintf(filename, "results/runs2_%d_%d_%d.log",  use_mpi, use_omp, use_cuda);
+    sprintf(filename, "results/runs%s_%d_%d_%d.log",  has_file ? "_with_image" :"", use_mpi, use_omp, use_cuda);
 
     FILE *fptr = fopen(filename, "a");
     fprintf(fptr, "%d, %d, %d, %d, %d, %d, %d, %d, %f\n", N, size, image->n_images, image->width[0], image->height[0], use_mpi, use_omp, use_cuda, duration);
     fclose(fptr);
-    if (!benchmark) {
+    if (has_file) {
         export_file(output_filename, image);
     }
     free(image_information);
@@ -861,6 +866,7 @@ int main(int argc, char** argv)
     int use_mpi = 0;
     int use_omp = 0;
     int use_cuda = 0;
+    int has_file = 0;
 
     /* Check command-line arguments */
     if (argc < 3) {
@@ -870,9 +876,10 @@ int main(int argc, char** argv)
     if (argc == 3) {
         input_filename = argv[1];
         output_filename = argv[2];
+        has_file = 1;
     }
     if (argc == 8) {
-        printf("Benchmark mode\n");
+        printf("Benchmark mode with generated gif\n");
         benchmark_n_images = atoi(argv[1]);
         benchmark_width = atoi(argv[2]);
         benchmark_height = atoi(argv[3]);
@@ -882,6 +889,20 @@ int main(int argc, char** argv)
         use_cuda = atoi(argv[7]);
         benchmark = 1;
     }
-    run(argc, argv, benchmark_n_images, benchmark_width, benchmark_height, N, input_filename, output_filename, benchmark, use_mpi, use_omp, use_cuda);
+    if (argc == 10) {
+        printf("Benchmark mode with files\n");
+        benchmark_n_images = atoi(argv[1]);
+        benchmark_width = atoi(argv[2]);
+        benchmark_height = atoi(argv[3]);
+        N = atoi(argv[4]);
+        use_mpi = atoi(argv[5]);
+        use_omp = atoi(argv[6]);
+        use_cuda = atoi(argv[7]);
+        input_filename = argv[8];
+        output_filename = argv[9];
+        benchmark = 1;
+        has_file = 1;
+    }
+    run(argc, argv, benchmark_n_images, benchmark_width, benchmark_height, N, input_filename, output_filename, benchmark, has_file, use_mpi, use_omp, use_cuda);
     return 0;
 }
